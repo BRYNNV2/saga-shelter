@@ -1,4 +1,5 @@
 import { useNavigate, useLocation } from "react-router-dom";
+import { useAuth } from "@/contexts/AuthContext";
 import {
   Archive,
   LayoutDashboard,
@@ -23,7 +24,13 @@ const menuItems = [
 const DashboardSidebar = () => {
   const navigate = useNavigate();
   const location = useLocation();
+  const { signOut } = useAuth();
   const [collapsed, setCollapsed] = useState(false);
+
+  const handleLogout = async () => {
+    await signOut();
+    navigate("/login");
+  };
 
   return (
     <aside
@@ -72,7 +79,7 @@ const DashboardSidebar = () => {
           {!collapsed && <span>Kecilkan</span>}
         </button>
         <button
-          onClick={() => navigate("/")}
+          onClick={handleLogout}
           className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-sidebar-foreground/70 hover:bg-destructive/20 hover:text-destructive transition-all"
         >
           <LogOut className="h-5 w-5 shrink-0" />

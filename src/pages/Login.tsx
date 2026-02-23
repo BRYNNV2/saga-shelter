@@ -1,25 +1,49 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Archive, Eye, EyeOff, Lock, Mail } from "lucide-react";
+import { Archive, Eye, EyeOff, Lock, Mail, User } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
 
 const Login = () => {
   const navigate = useNavigate();
+  const { signIn, signUp, user } = useAuth();
+  const { toast } = useToast();
+  const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [fullName, setFullName] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
-  const handleLogin = async (e: React.FormEvent) => {
+  // Redirect if already logged in
+  if (user) {
+    navigate("/dashboard", { replace: true });
+    return null;
+  }
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
-    // Simulate login
-    setTimeout(() => {
-      setIsLoading(false);
-      navigate("/dashboard");
-    }, 800);
+
+    if (isSignUp) {
+      const { error } = await signUp(email, password, fullName);
+      if (error) {
+        toast({ title: "Gagal mendaftar", description: error.message, variant: "destructive" });
+      } else {
+        toast({ title: "Berhasil!", description: "Silakan cek email Anda untuk verifikasi." });
+      }
+    } else {
+      const { error } = await signIn(email, password);
+      if (error) {
+        toast({ title: "Gagal masuk", description: error.message, variant: "destructive" });
+      } else {
+        navigate("/dashboard");
+      }
+    }
+    setIsLoading(false);
   };
 
   return (
@@ -58,7 +82,7 @@ const Login = () => {
         </div>
       </div>
 
-      {/* Right Panel - Login Form */}
+      {/* Right Panel - Form */}
       <div className="flex-1 flex items-center justify-center p-8">
         <div className="w-full max-w-md">
           <div className="lg:hidden flex items-center gap-3 mb-8 justify-center">
@@ -69,11 +93,33 @@ const Login = () => {
           </div>
 
           <div className="mb-8">
-            <h2 className="text-2xl font-bold text-foreground">Selamat Datang!</h2>
-            <p className="text-muted-foreground mt-2">Masuk ke akun Anda untuk melanjutkan</p>
+            <h2 className="text-2xl font-bold text-foreground">
+              {isSignUp ? "Buat Akun Baru" : "Selamat Datang!"}
+            </h2>
+            <p className="text-muted-foreground mt-2">
+              {isSignUp ? "Daftar untuk mulai mengelola arsip" : "Masuk ke akun Anda untuk melanjutkan"}
+            </p>
           </div>
 
-          <form onSubmit={handleLogin} className="space-y-5">
+          <form onSubmit={handleSubmit} className="space-y-5">
+            {isSignUp && (
+              <div className="space-y-2">
+                <Label htmlFor="fullName">Nama Lengkap</Label>
+                <div className="relative">
+                  <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    id="fullName"
+                    type="text"
+                    placeholder="Nama lengkap Anda"
+                    className="pl-10 h-11"
+                    value={fullName}
+                    onChange={(e) => setFullName(e.target.value)}
+                    required
+                  />
+                </div>
+              </div>
+            )}
+
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
               <div className="relative">
@@ -91,12 +137,7 @@ const Login = () => {
             </div>
 
             <div className="space-y-2">
-              <div className="flex justify-between items-center">
-                <Label htmlFor="password">Password</Label>
-                <button type="button" className="text-sm text-accent hover:underline font-medium">
-                  Lupa Password?
-                </button>
-              </div>
+              <Label htmlFor="password">Password</Label>
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
@@ -107,6 +148,7 @@ const Login = () => {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   required
+                  minLength={6}
                 />
                 <button
                   type="button"
@@ -119,13 +161,18 @@ const Login = () => {
             </div>
 
             <Button type="submit" className="w-full h-11 text-base font-semibold" disabled={isLoading}>
-              {isLoading ? "Memproses..." : "Masuk"}
+              {isLoading ? "Memproses..." : isSignUp ? "Daftar" : "Masuk"}
             </Button>
           </form>
 
           <p className="text-center text-sm text-muted-foreground mt-8">
-            Belum punya akun?{" "}
-            <button className="text-accent font-semibold hover:underline">Hubungi Admin</button>
+            {isSignUp ? "Sudah punya akun?" : "Belum punya akun?"}{" "}
+            <button
+              onClick={() => setIsSignUp(!isSignUp)}
+              className="text-accent font-semibold hover:underline"
+            >
+              {isSignUp ? "Masuk" : "Daftar Sekarang"}
+            </button>
           </p>
         </div>
       </div>
