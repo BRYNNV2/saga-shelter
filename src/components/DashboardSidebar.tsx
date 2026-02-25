@@ -15,8 +15,8 @@ import { useState } from "react";
 
 const menuItems = [
   { icon: LayoutDashboard, label: "Dashboard", path: "/dashboard" },
-  { icon: FileText, label: "Semua Arsip", path: "/dashboard/arsip" },
-  { icon: FolderOpen, label: "Kategori", path: "/dashboard/kategori" },
+  { icon: FileText, label: "Berkas KK", path: "/dashboard/berkas-kk" },
+  { icon: FolderOpen, label: "Semua Arsip", path: "/dashboard/arsip" },
   { icon: Upload, label: "Upload Arsip", path: "/dashboard/upload" },
   { icon: Settings, label: "Pengaturan", path: "/dashboard/pengaturan" },
 ];

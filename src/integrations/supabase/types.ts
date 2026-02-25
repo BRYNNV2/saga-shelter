@@ -50,6 +50,63 @@ export type Database = {
         }
         Relationships: []
       }
+      kk_records: {
+        Row: {
+          alamat: string | null
+          anggota: Json | null
+          created_at: string
+          id: string
+          image_url: string
+          kabupaten: string | null
+          kecamatan: string | null
+          kelurahan: string | null
+          kepala_keluarga: string | null
+          no_kk: string | null
+          provinsi: string | null
+          raw_text: string | null
+          rt_rw: string | null
+          status: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          alamat?: string | null
+          anggota?: Json | null
+          created_at?: string
+          id?: string
+          image_url: string
+          kabupaten?: string | null
+          kecamatan?: string | null
+          kelurahan?: string | null
+          kepala_keluarga?: string | null
+          no_kk?: string | null
+          provinsi?: string | null
+          raw_text?: string | null
+          rt_rw?: string | null
+          status?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          alamat?: string | null
+          anggota?: Json | null
+          created_at?: string
+          id?: string
+          image_url?: string
+          kabupaten?: string | null
+          kecamatan?: string | null
+          kelurahan?: string | null
+          kepala_keluarga?: string | null
+          no_kk?: string | null
+          provinsi?: string | null
+          raw_text?: string | null
+          rt_rw?: string | null
+          status?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           created_at: string
