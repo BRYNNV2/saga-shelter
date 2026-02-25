@@ -14,6 +14,7 @@ import {
   Image as ImageIcon,
   Users,
   Eye,
+  FileSpreadsheet,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -33,6 +34,7 @@ const BerkasKK = () => {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [uploading, setUploading] = useState(false);
+  const [importingExcel, setImportingExcel] = useState(false);
   const [scanningId, setScanningId] = useState<string | null>(null);
   const [viewRecord, setViewRecord] = useState<any>(null);
 
@@ -137,6 +139,82 @@ const BerkasKK = () => {
     },
   });
 
+  // Import from Excel
+  const handleImportExcel = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file || !user) return;
+
+      setImportingExcel(true);
+      try {
+        const arrayBuffer = await file.arrayBuffer();
+        const wb = XLSX.read(arrayBuffer, { type: "array" });
+
+        // Try to read "Data KK" sheet first, fallback to first sheet
+        const kkSheetName = wb.SheetNames.find((n) => n.toLowerCase().includes("data kk")) || wb.SheetNames[0];
+        const kkSheet = wb.Sheets[kkSheetName];
+        const kkRows: any[] = XLSX.utils.sheet_to_json(kkSheet);
+
+        // Try to read "Anggota Keluarga" sheet
+        const anggotaSheetName = wb.SheetNames.find((n) => n.toLowerCase().includes("anggota"));
+        const anggotaRows: any[] = anggotaSheetName
+          ? XLSX.utils.sheet_to_json(wb.Sheets[anggotaSheetName])
+          : [];
+
+        let imported = 0;
+        for (const row of kkRows) {
+          const noKK = row["No KK"] || row["no_kk"] || row["NO KK"] || "";
+          const anggota = anggotaRows
+            .filter((a: any) => (a["No KK"] || a["no_kk"] || a["NO KK"] || "") === noKK)
+            .map((a: any) => ({
+              nama: a["Nama"] || a["nama"] || "",
+              nik: a["NIK"] || a["nik"] || "",
+              jenis_kelamin: a["Jenis Kelamin"] || a["jenis_kelamin"] || "",
+              tempat_lahir: a["Tempat Lahir"] || a["tempat_lahir"] || "",
+              tanggal_lahir: a["Tanggal Lahir"] || a["tanggal_lahir"] || "",
+              agama: a["Agama"] || a["agama"] || "",
+              pendidikan: a["Pendidikan"] || a["pendidikan"] || "",
+              pekerjaan: a["Pekerjaan"] || a["pekerjaan"] || "",
+              status_perkawinan: a["Status Perkawinan"] || a["status_perkawinan"] || "",
+              hubungan_keluarga: a["Hubungan Keluarga"] || a["hubungan_keluarga"] || "",
+              kewarganegaraan: a["Kewarganegaraan"] || a["kewarganegaraan"] || "",
+            }));
+
+          const { error: insertError } = await supabase.from("kk_records").insert({
+            user_id: user.id,
+            image_url: "",
+            no_kk: String(noKK),
+            kepala_keluarga: row["Kepala Keluarga"] || row["kepala_keluarga"] || "",
+            alamat: row["Alamat"] || row["alamat"] || "",
+            rt_rw: row["RT/RW"] || row["rt_rw"] || "",
+            kelurahan: row["Kelurahan"] || row["kelurahan"] || "",
+            kecamatan: row["Kecamatan"] || row["kecamatan"] || "",
+            kabupaten: row["Kabupaten"] || row["kabupaten"] || "",
+            provinsi: row["Provinsi"] || row["provinsi"] || "",
+            anggota: anggota.length > 0 ? anggota : [],
+            status: "scanned",
+          });
+
+          if (insertError) throw insertError;
+          imported++;
+        }
+
+        toast({ title: "Import berhasil", description: `${imported} data KK berhasil diimport` });
+        queryClient.invalidateQueries({ queryKey: ["kk-records"] });
+      } catch (err: any) {
+        toast({
+          title: "Import gagal",
+          description: err.message,
+          variant: "destructive",
+        });
+      } finally {
+        setImportingExcel(false);
+        e.target.value = "";
+      }
+    },
+    [user, toast, queryClient]
+  );
+
   // Export to Excel
   const exportToExcel = () => {
     const scannedRecords = records.filter((r: any) => r.status === "scanned");
@@ -145,7 +223,6 @@ const BerkasKK = () => {
       return;
     }
 
-    // KK summary sheet
     const summaryData = scannedRecords.map((r: any) => ({
       "No KK": r.no_kk || "-",
       "Kepala Keluarga": r.kepala_keluarga || "-",
@@ -158,7 +235,6 @@ const BerkasKK = () => {
       "Jumlah Anggota": Array.isArray(r.anggota) ? r.anggota.length : 0,
     }));
 
-    // Members sheet
     const membersData: any[] = [];
     scannedRecords.forEach((r: any) => {
       if (Array.isArray(r.anggota)) {
@@ -208,6 +284,25 @@ const BerkasKK = () => {
                 <Download className="h-4 w-4 mr-2" />
                 Export Excel
               </Button>
+              <label>
+                <Button variant="outline" asChild disabled={importingExcel}>
+                  <span>
+                    {importingExcel ? (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    ) : (
+                      <FileSpreadsheet className="h-4 w-4 mr-2" />
+                    )}
+                    Import Excel
+                  </span>
+                </Button>
+                <input
+                  type="file"
+                  accept=".xlsx,.xls,.csv"
+                  className="hidden"
+                  onChange={handleImportExcel}
+                  disabled={importingExcel}
+                />
+              </label>
               <label>
                 <Button asChild disabled={uploading}>
                   <span>
