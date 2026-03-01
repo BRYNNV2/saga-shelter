@@ -3,6 +3,8 @@ import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, useCallback } from "react";
+import { useActivityLog } from "@/hooks/useActivityLog";
+import { printData } from "@/lib/printUtils";
 import {
   Upload,
   FileSearch,
@@ -15,9 +17,17 @@ import {
   Users,
   Eye,
   FileSpreadsheet,
+  Pencil,
+  Plus,
+  X,
+  Save,
+  UserPlus,
+  Printer,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 import { id as localeId } from "date-fns/locale";
@@ -26,6 +36,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogFooter,
 } from "@/components/ui/dialog";
 import * as XLSX from "xlsx";
 
@@ -33,10 +44,23 @@ const BerkasKK = () => {
   const { user } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const { log } = useActivityLog();
   const [uploading, setUploading] = useState(false);
   const [importingExcel, setImportingExcel] = useState(false);
   const [scanningId, setScanningId] = useState<string | null>(null);
   const [viewRecord, setViewRecord] = useState<any>(null);
+  const [editRecord, setEditRecord] = useState<any>(null);
+  const [savingEdit, setSavingEdit] = useState(false);
+
+  // Helper — open edit dialog with a deep copy
+  const openEdit = (rec: any) => {
+    setEditRecord({
+      ...rec,
+      anggota: Array.isArray(rec.anggota)
+        ? rec.anggota.map((a: any) => ({ ...a }))
+        : [],
+    });
+  };
 
   // Fetch KK records
   const { data: records = [], isLoading } = useQuery({
@@ -88,6 +112,7 @@ const BerkasKK = () => {
 
         toast({ title: "Berhasil", description: "File berhasil diupload" });
         queryClient.invalidateQueries({ queryKey: ["kk-records"] });
+        log({ action: "upload", entityType: "kk", description: `Mengupload ${files.length} berkas KK untuk diproses` });
       } catch (err: any) {
         toast({
           title: "Gagal upload",
@@ -116,6 +141,8 @@ const BerkasKK = () => {
     onSuccess: () => {
       toast({ title: "Scan berhasil", description: "Data KK berhasil diekstrak" });
       queryClient.invalidateQueries({ queryKey: ["kk-records"] });
+      queryClient.invalidateQueries({ queryKey: ["activity-logs"] });
+      log({ action: "scan", entityType: "kk", description: `Scan KK berhasil diekstrak` });
     },
     onError: (err: any) => {
       toast({
@@ -136,6 +163,46 @@ const BerkasKK = () => {
     onSuccess: () => {
       toast({ title: "Berhasil dihapus" });
       queryClient.invalidateQueries({ queryKey: ["kk-records"] });
+      queryClient.invalidateQueries({ queryKey: ["activity-logs"] });
+      log({ action: "delete", entityType: "kk", description: "Menghapus berkas KK" });
+    },
+  });
+
+  // Edit mutation
+  const editMutation = useMutation({
+    mutationFn: async (data: any) => {
+      const { error } = await supabase
+        .from("kk_records")
+        .update({
+          no_kk: data.no_kk ?? null,
+          kepala_keluarga: data.kepala_keluarga ?? null,
+          alamat: data.alamat ?? null,
+          rt_rw: data.rt_rw ?? null,
+          kelurahan: data.kelurahan ?? null,
+          kecamatan: data.kecamatan ?? null,
+          kabupaten: data.kabupaten ?? null,
+          provinsi: data.provinsi ?? null,
+          anggota: data.anggota ?? [],
+          status: "scanned",
+        })
+        .eq("id", data.id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast({ title: "Data KK berhasil diperbarui" });
+      queryClient.invalidateQueries({ queryKey: ["kk-records"] });
+      queryClient.invalidateQueries({ queryKey: ["activity-logs"] });
+      log({
+        action: "edit",
+        entityType: "kk",
+        entityId: editRecord?.id,
+        entityName: editRecord?.kepala_keluarga ?? editRecord?.no_kk,
+        description: `Mengedit data KK "${editRecord?.kepala_keluarga ?? editRecord?.no_kk}" secara manual`,
+      });
+      setEditRecord(null);
+    },
+    onError: (err: any) => {
+      toast({ title: "Gagal menyimpan", description: err.message, variant: "destructive" });
     },
   });
 
@@ -280,10 +347,39 @@ const BerkasKK = () => {
               </p>
             </div>
             <div className="flex items-center gap-3">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  const scanned = records.filter((r: any) => r.status === "scanned");
+                  printData({
+                    title: "Daftar Berkas Kartu Keluarga",
+                    subtitle: `Total: ${scanned.length} KK sudah discan`,
+                    columns: [
+                      { header: "#", key: "_no", width: "40px" },
+                      { header: "No. KK", key: "no_kk", width: "160px" },
+                      { header: "Kepala Keluarga", key: "kepala_keluarga", width: "180px" },
+                      { header: "Alamat", key: "alamat" },
+                      { header: "RT/RW", key: "rt_rw", width: "60px" },
+                      { header: "Kelurahan", key: "kelurahan" },
+                      { header: "Kecamatan", key: "kecamatan" },
+                      { header: "Anggota", key: "_anggota", width: "60px" },
+                    ],
+                    data: scanned.map((r: any, i: number) => ({
+                      ...r,
+                      _no: i + 1,
+                      _anggota: Array.isArray(r.anggota) ? r.anggota.length : 0,
+                    })),
+                  });
+                }}
+                disabled={records.filter((r: any) => r.status === "scanned").length === 0}
+              >
+                <Printer className="h-4 w-4 mr-2" /> Cetak
+              </Button>
               <Button variant="outline" onClick={exportToExcel} disabled={records.filter((r: any) => r.status === "scanned").length === 0}>
                 <Download className="h-4 w-4 mr-2" />
                 Export Excel
               </Button>
+
               <label>
                 <Button variant="outline" asChild disabled={importingExcel}>
                   <span>
@@ -410,8 +506,8 @@ const BerkasKK = () => {
                           {record.no_kk
                             ? `No. KK: ${record.no_kk}`
                             : format(new Date(record.created_at), "dd MMM yyyy HH:mm", {
-                                locale: localeId,
-                              })}
+                              locale: localeId,
+                            })}
                         </p>
                         {record.status === "scanned" && Array.isArray(record.anggota) && (
                           <div className="flex items-center gap-1 mt-1 text-xs text-muted-foreground">
@@ -432,11 +528,22 @@ const BerkasKK = () => {
                         <Button
                           size="sm"
                           variant="ghost"
+                          title="Lihat detail"
                           onClick={() => setViewRecord(record)}
                         >
                           <Eye className="h-4 w-4" />
                         </Button>
                       )}
+
+                      {/* Edit button — semua status */}
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        title="Edit data KK"
+                        onClick={() => openEdit(record)}
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
 
                       {record.status === "pending" && (
                         <Button
@@ -471,71 +578,66 @@ const BerkasKK = () => {
         </div>
       </main>
 
-      {/* Detail Dialog */}
+      {/* Detail Dialog (view only) */}
       <Dialog open={!!viewRecord} onOpenChange={() => setViewRecord(null)}>
         <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Detail Kartu Keluarga</DialogTitle>
+            <DialogTitle className="flex items-center gap-2">
+              <Users className="h-5 w-5 text-primary" />
+              Detail Kartu Keluarga
+            </DialogTitle>
           </DialogHeader>
           {viewRecord && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-3 text-sm">
-                <div>
-                  <p className="text-muted-foreground">No. KK</p>
-                  <p className="font-medium">{viewRecord.no_kk || "-"}</p>
+            <div className="space-y-5">
+              {/* Gambar KK */}
+              {viewRecord.image_url && (
+                <div className="rounded-xl overflow-hidden border border-border">
+                  <img src={viewRecord.image_url} alt="Foto KK" className="w-full object-contain max-h-64" />
                 </div>
-                <div>
-                  <p className="text-muted-foreground">Kepala Keluarga</p>
-                  <p className="font-medium">{viewRecord.kepala_keluarga || "-"}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">Alamat</p>
-                  <p className="font-medium">{viewRecord.alamat || "-"}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">RT/RW</p>
-                  <p className="font-medium">{viewRecord.rt_rw || "-"}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">Kelurahan</p>
-                  <p className="font-medium">{viewRecord.kelurahan || "-"}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">Kecamatan</p>
-                  <p className="font-medium">{viewRecord.kecamatan || "-"}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">Kabupaten</p>
-                  <p className="font-medium">{viewRecord.kabupaten || "-"}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">Provinsi</p>
-                  <p className="font-medium">{viewRecord.provinsi || "-"}</p>
-                </div>
+              )}
+
+              {/* Field info */}
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                {[
+                  { label: "No. KK", val: viewRecord.no_kk },
+                  { label: "Kepala Keluarga", val: viewRecord.kepala_keluarga },
+                  { label: "Alamat", val: viewRecord.alamat },
+                  { label: "RT/RW", val: viewRecord.rt_rw },
+                  { label: "Kelurahan", val: viewRecord.kelurahan },
+                  { label: "Kecamatan", val: viewRecord.kecamatan },
+                  { label: "Kabupaten", val: viewRecord.kabupaten },
+                  { label: "Provinsi", val: viewRecord.provinsi },
+                ].map((f) => (
+                  <div key={f.label} className="p-3 bg-muted/40 rounded-lg">
+                    <p className="text-xs text-muted-foreground mb-0.5">{f.label}</p>
+                    <p className="font-medium text-foreground">{f.val || "—"}</p>
+                  </div>
+                ))}
               </div>
 
+              {/* Anggota keluarga */}
               {Array.isArray(viewRecord.anggota) && viewRecord.anggota.length > 0 && (
                 <div>
-                  <h3 className="font-semibold text-foreground mb-2">Anggota Keluarga</h3>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm border border-border rounded-lg">
+                  <h3 className="font-semibold text-foreground mb-2 flex items-center gap-2">
+                    <Users className="h-4 w-4" /> Anggota Keluarga ({viewRecord.anggota.length})
+                  </h3>
+                  <div className="overflow-x-auto rounded-lg border border-border">
+                    <table className="w-full text-sm">
                       <thead>
                         <tr className="bg-muted/50">
-                          <th className="text-left p-2 border-b border-border">Nama</th>
-                          <th className="text-left p-2 border-b border-border">NIK</th>
-                          <th className="text-left p-2 border-b border-border">L/P</th>
-                          <th className="text-left p-2 border-b border-border">Hubungan</th>
-                          <th className="text-left p-2 border-b border-border">Pekerjaan</th>
+                          {["Nama", "NIK", "L/P", "Hubungan", "Pekerjaan"].map((h) => (
+                            <th key={h} className="text-left p-2.5 border-b border-border font-semibold text-muted-foreground">{h}</th>
+                          ))}
                         </tr>
                       </thead>
-                      <tbody>
+                      <tbody className="divide-y divide-border">
                         {viewRecord.anggota.map((a: any, i: number) => (
                           <tr key={i} className="hover:bg-muted/30">
-                            <td className="p-2 border-b border-border">{a.nama || "-"}</td>
-                            <td className="p-2 border-b border-border">{a.nik || "-"}</td>
-                            <td className="p-2 border-b border-border">{a.jenis_kelamin || "-"}</td>
-                            <td className="p-2 border-b border-border">{a.hubungan_keluarga || "-"}</td>
-                            <td className="p-2 border-b border-border">{a.pekerjaan || "-"}</td>
+                            <td className="p-2.5">{a.nama || "—"}</td>
+                            <td className="p-2.5 font-mono text-xs">{a.nik || "—"}</td>
+                            <td className="p-2.5">{a.jenis_kelamin || "—"}</td>
+                            <td className="p-2.5">{a.hubungan_keluarga || "—"}</td>
+                            <td className="p-2.5">{a.pekerjaan || "—"}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -545,6 +647,220 @@ const BerkasKK = () => {
               )}
             </div>
           )}
+          <DialogFooter className="mt-4">
+            <Button variant="outline" onClick={() => setViewRecord(null)}>Tutup</Button>
+            {viewRecord && (
+              <Button onClick={() => { openEdit(viewRecord); setViewRecord(null); }}>
+                <Pencil className="h-4 w-4 mr-2" /> Edit Data
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Edit Dialog ── */}
+      <Dialog open={!!editRecord} onOpenChange={(o) => { if (!o) setEditRecord(null); }}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Pencil className="h-5 w-5 text-primary" /> Edit Data Kartu Keluarga
+            </DialogTitle>
+          </DialogHeader>
+
+          {editRecord && (
+            <div className="space-y-5">
+              {/* ── Informasi KK ── */}
+              <div className="glass-card rounded-xl p-4">
+                <h3 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
+                  <Users className="h-4 w-4 text-primary" /> Informasi Kepala Keluarga
+                </h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <Label htmlFor="edit-nokk">Nomor KK</Label>
+                    <Input
+                      id="edit-nokk"
+                      value={editRecord.no_kk ?? ""}
+                      onChange={(e) => setEditRecord({ ...editRecord, no_kk: e.target.value })}
+                      placeholder="16 digit nomor KK"
+                      className="mt-1 font-mono"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="edit-kk">Kepala Keluarga</Label>
+                    <Input
+                      id="edit-kk"
+                      value={editRecord.kepala_keluarga ?? ""}
+                      onChange={(e) => setEditRecord({ ...editRecord, kepala_keluarga: e.target.value })}
+                      placeholder="Nama lengkap kepala keluarga"
+                      className="mt-1"
+                    />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <Label htmlFor="edit-alamat">Alamat</Label>
+                    <Input
+                      id="edit-alamat"
+                      value={editRecord.alamat ?? ""}
+                      onChange={(e) => setEditRecord({ ...editRecord, alamat: e.target.value })}
+                      placeholder="Jalan, nomor rumah"
+                      className="mt-1"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="edit-rtrw">RT/RW</Label>
+                    <Input
+                      id="edit-rtrw"
+                      value={editRecord.rt_rw ?? ""}
+                      onChange={(e) => setEditRecord({ ...editRecord, rt_rw: e.target.value })}
+                      placeholder="001/002"
+                      className="mt-1"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="edit-kel">Kelurahan / Desa</Label>
+                    <Input
+                      id="edit-kel"
+                      value={editRecord.kelurahan ?? ""}
+                      onChange={(e) => setEditRecord({ ...editRecord, kelurahan: e.target.value })}
+                      className="mt-1"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="edit-kec">Kecamatan</Label>
+                    <Input
+                      id="edit-kec"
+                      value={editRecord.kecamatan ?? ""}
+                      onChange={(e) => setEditRecord({ ...editRecord, kecamatan: e.target.value })}
+                      className="mt-1"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="edit-kab">Kabupaten / Kota</Label>
+                    <Input
+                      id="edit-kab"
+                      value={editRecord.kabupaten ?? ""}
+                      onChange={(e) => setEditRecord({ ...editRecord, kabupaten: e.target.value })}
+                      className="mt-1"
+                    />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <Label htmlFor="edit-prov">Provinsi</Label>
+                    <Input
+                      id="edit-prov"
+                      value={editRecord.provinsi ?? ""}
+                      onChange={(e) => setEditRecord({ ...editRecord, provinsi: e.target.value })}
+                      className="mt-1"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* ── Anggota Keluarga ── */}
+              <div className="glass-card rounded-xl p-4">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                    <Users className="h-4 w-4 text-primary" />
+                    Anggota Keluarga ({editRecord.anggota?.length ?? 0} orang)
+                  </h3>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setEditRecord({
+                      ...editRecord,
+                      anggota: [
+                        ...(editRecord.anggota ?? []),
+                        { nama: "", nik: "", jenis_kelamin: "", hubungan_keluarga: "", pekerjaan: "", tempat_lahir: "", tanggal_lahir: "", agama: "", pendidikan: "", status_perkawinan: "", kewarganegaraan: "WNI" }
+                      ]
+                    })}
+                  >
+                    <UserPlus className="h-4 w-4 mr-1.5" /> Tambah Anggota
+                  </Button>
+                </div>
+
+                {(!editRecord.anggota || editRecord.anggota.length === 0) ? (
+                  <div className="py-8 text-center text-muted-foreground text-sm border-2 border-dashed border-border rounded-lg">
+                    Belum ada anggota keluarga. Klik "Tambah Anggota" untuk menambahkan.
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {editRecord.anggota.map((anggota: any, idx: number) => (
+                      <div key={idx} className="border border-border rounded-xl p-4 relative group">
+                        {/* Hapus anggota */}
+                        <button
+                          onClick={() => {
+                            const upd = [...editRecord.anggota];
+                            upd.splice(idx, 1);
+                            setEditRecord({ ...editRecord, anggota: upd });
+                          }}
+                          className="absolute top-3 right-3 p-1 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 opacity-0 group-hover:opacity-100 transition-all"
+                          title="Hapus anggota"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+
+                        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">
+                          Anggota #{idx + 1}
+                        </p>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                          {([
+                            { key: "nama", label: "Nama Lengkap", placeholder: "Nama" },
+                            { key: "nik", label: "NIK", placeholder: "16 digit NIK", mono: true },
+                            { key: "jenis_kelamin", label: "Jenis Kelamin", placeholder: "L / P" },
+                            { key: "hubungan_keluarga", label: "Hubungan Keluarga", placeholder: "Kepala/Istri/Anak" },
+                            { key: "tempat_lahir", label: "Tempat Lahir", placeholder: "Kota" },
+                            { key: "tanggal_lahir", label: "Tanggal Lahir", placeholder: "DD-MM-YYYY" },
+                            { key: "agama", label: "Agama", placeholder: "Islam/Kristen/dll" },
+                            { key: "pendidikan", label: "Pendidikan", placeholder: "SMA/S1/dll" },
+                            { key: "pekerjaan", label: "Pekerjaan", placeholder: "Profesi" },
+                            { key: "status_perkawinan", label: "Status Kawin", placeholder: "Kawin/Belum Kawin" },
+                            { key: "kewarganegaraan", label: "Kewarganegaraan", placeholder: "WNI" },
+                          ] as const).map((field) => (
+                            <div key={field.key}>
+                              <Label className="text-xs">{field.label}</Label>
+                              <Input
+                                value={anggota[field.key] ?? ""}
+                                onChange={(e) => {
+                                  const upd = editRecord.anggota.map((a: any, i: number) =>
+                                    i === idx ? { ...a, [field.key]: e.target.value } : a
+                                  );
+                                  setEditRecord({ ...editRecord, anggota: upd });
+                                }}
+                                placeholder={field.placeholder}
+                                className={`mt-0.5 h-8 text-xs ${(field as any).mono ? 'font-mono' : ''}`}
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          <DialogFooter className="mt-4 flex items-center gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setEditRecord(null)}
+              disabled={editMutation.isPending}
+            >
+              Batal
+            </Button>
+            <Button
+              onClick={async () => {
+                setSavingEdit(true);
+                try { await editMutation.mutateAsync(editRecord); }
+                finally { setSavingEdit(false); }
+              }}
+              disabled={savingEdit || editMutation.isPending}
+            >
+              {savingEdit
+                ? <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                : <Save className="h-4 w-4 mr-2" />}
+              Simpan Perubahan
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

@@ -8,6 +8,11 @@ import Index from "./pages/Index";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import BerkasKK from "./pages/BerkasKK";
+import SemuaArsip from "./pages/SemuaArsip";
+import UploadArsip from "./pages/UploadArsip";
+import Pengaturan from "./pages/Pengaturan";
+import Laporan from "./pages/Laporan";
+import RiwayatAktivitas from "./pages/RiwayatAktivitas";
 import NotFound from "./pages/NotFound";
 import ProtectedRoute from "./components/ProtectedRoute";
 
@@ -36,6 +41,46 @@ const App = () => (
               element={
                 <ProtectedRoute>
                   <BerkasKK />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/dashboard/arsip"
+              element={
+                <ProtectedRoute>
+                  <SemuaArsip />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/dashboard/upload"
+              element={
+                <ProtectedRoute>
+                  <UploadArsip />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/dashboard/pengaturan"
+              element={
+                <ProtectedRoute>
+                  <Pengaturan />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/dashboard/laporan"
+              element={
+                <ProtectedRoute>
+                  <Laporan />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/dashboard/riwayat"
+              element={
+                <ProtectedRoute>
+                  <RiwayatAktivitas />
                 </ProtectedRoute>
               }
             />
