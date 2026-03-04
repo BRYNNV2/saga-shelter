@@ -153,6 +153,49 @@ CREATE TRIGGER update_kk_records_updated_at
 
 
 -- ─────────────────────────────────────────
+-- X. TABEL KTP_RECORDS (data Kartu Tanda Penduduk)
+-- ─────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS public.ktp_records (
+  id               UUID NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id          UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  image_url        TEXT NOT NULL DEFAULT '',
+  nik              TEXT,
+  nama             TEXT,
+  tempat_lahir     TEXT,
+  tanggal_lahir    TEXT,
+  jenis_kelamin    TEXT,
+  golongan_darah   TEXT,
+  alamat           TEXT,
+  rt_rw            TEXT,
+  kelurahan        TEXT,
+  kecamatan        TEXT,
+  agama            TEXT,
+  status_perkawinan TEXT,
+  pekerjaan        TEXT,
+  kewarganegaraan  TEXT,
+  raw_text         TEXT,
+  status           TEXT NOT NULL DEFAULT 'pending',
+  created_at       TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+  updated_at       TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.ktp_records ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can view own ktp_records"
+  ON public.ktp_records FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "Users can insert own ktp_records"
+  ON public.ktp_records FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Users can update own ktp_records"
+  ON public.ktp_records FOR UPDATE USING (auth.uid() = user_id);
+CREATE POLICY "Users can delete own ktp_records"
+  ON public.ktp_records FOR DELETE USING (auth.uid() = user_id);
+
+DROP TRIGGER IF EXISTS update_ktp_records_updated_at ON public.ktp_records;
+CREATE TRIGGER update_ktp_records_updated_at
+  BEFORE UPDATE ON public.ktp_records
+  FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+
+-- ─────────────────────────────────────────
 -- 6. TABEL ACTIVITY_LOGS (riwayat aktivitas)
 -- ─────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS public.activity_logs (

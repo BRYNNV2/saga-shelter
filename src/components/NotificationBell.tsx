@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -35,6 +35,7 @@ const ACTION_CONFIG: Record<string, { label: string; icon: React.ElementType; co
 const ENTITY_PATH: Record<string, string> = {
     arsip: "/dashboard/arsip",
     kk: "/dashboard/berkas-kk",
+    ktp: "/dashboard/berkas-ktp",
     system: "/dashboard",
 };
 
@@ -50,9 +51,10 @@ interface Notif {
 
 interface Props {
     collapsed?: boolean;
+    variant?: "sidebar" | "topbar";
 }
 
-export const NotificationBell = ({ collapsed = false }: Props) => {
+export const NotificationBell = ({ collapsed = false, variant = "sidebar" }: Props) => {
     const { user } = useAuth();
     const navigate = useNavigate();
     const dropRef = useRef<HTMLDivElement>(null);
@@ -65,18 +67,19 @@ export const NotificationBell = ({ collapsed = false }: Props) => {
     const [popAnim, setPopAnim] = useState(false); // bell ring animation
 
     // ── Fetch recent notifications ──
-    const fetchNotifs = async () => {
+    const fetchNotifs = useCallback(async () => {
         if (!user) return;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const { data } = await (supabase as any)
             .from("activity_logs")
             .select("id, action, entity_type, description, created_at")
             .eq("user_id", user.id)
             .order("created_at", { ascending: false })
             .limit(30);
-        if (data) setNotifs(data);
-    };
+        if (data) setNotifs(data as Notif[]);
+    }, [user]);
 
-    useEffect(() => { fetchNotifs(); }, [user]);
+    useEffect(() => { fetchNotifs(); }, [fetchNotifs]);
 
     // ── Supabase Realtime subscription ──
     useEffect(() => {
@@ -85,15 +88,16 @@ export const NotificationBell = ({ collapsed = false }: Props) => {
         const channel = supabase
             .channel(`notif:${user.id}`)
             .on(
-                "postgres_changes" as any,
+                "postgres_changes",
                 {
                     event: "INSERT",
                     schema: "public",
                     table: "activity_logs",
                     filter: `user_id=eq.${user.id}`,
                 },
-                (payload: any) => {
-                    setNotifs((prev) => [payload.new, ...prev].slice(0, 30));
+                (payload) => {
+                    const newNotif = payload.new as Notif;
+                    setNotifs((prev) => [newNotif, ...prev].slice(0, 30));
                     // Bell ring animation
                     setPopAnim(true);
                     setTimeout(() => setPopAnim(false), 1000);
@@ -138,41 +142,58 @@ export const NotificationBell = ({ collapsed = false }: Props) => {
     return (
         <div className="relative" ref={dropRef}>
             {/* Bell Button */}
-            <button
-                onClick={handleOpen}
-                title="Notifikasi"
-                className={cn(
-                    "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200",
-                    open
-                        ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                        : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
-                )}
-            >
-                <div className="relative shrink-0">
-                    <Bell className={cn("h-5 w-5 transition-transform", popAnim && "animate-[ring_0.6s_ease-in-out]")} />
+            {variant === "topbar" ? (
+                <button
+                    onClick={handleOpen}
+                    title="Notifikasi"
+                    className="relative p-2 rounded-lg hover:bg-muted transition-colors flex items-center justify-center"
+                >
+                    <Bell className={cn("h-5 w-5 text-muted-foreground transition-transform", popAnim && "animate-[ring_0.6s_ease-in-out]")} />
                     {unreadCount > 0 && (
-                        <span className="absolute -top-1.5 -right-1.5 h-4 min-w-4 px-0.5 rounded-full bg-destructive text-destructive-foreground text-[9px] font-bold flex items-center justify-center leading-none">
+                        <span className="absolute top-1 right-1 h-4 min-w-[16px] px-1 rounded-full bg-destructive text-destructive-foreground text-[9px] font-bold flex items-center justify-center border-2 border-background leading-none">
                             {unreadCount > 9 ? "9+" : unreadCount}
                         </span>
                     )}
-                </div>
-                {!collapsed && <span>Notifikasi</span>}
-                {!collapsed && unreadCount > 0 && (
-                    <span className="ml-auto text-[10px] font-bold bg-destructive/20 text-destructive px-1.5 py-0.5 rounded-full">
-                        {unreadCount}
-                    </span>
-                )}
-            </button>
+                </button>
+            ) : (
+                <button
+                    onClick={handleOpen}
+                    title="Notifikasi"
+                    className={cn(
+                        "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200",
+                        open
+                            ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                            : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
+                    )}
+                >
+                    <div className="relative shrink-0">
+                        <Bell className={cn("h-5 w-5 transition-transform", popAnim && "animate-[ring_0.6s_ease-in-out]")} />
+                        {unreadCount > 0 && (
+                            <span className="absolute -top-1.5 -right-1.5 h-4 min-w-[16px] px-0.5 rounded-full bg-destructive text-destructive-foreground text-[9px] font-bold flex items-center justify-center leading-none">
+                                {unreadCount > 9 ? "9+" : unreadCount}
+                            </span>
+                        )}
+                    </div>
+                    {!collapsed && <span>Notifikasi</span>}
+                    {!collapsed && unreadCount > 0 && (
+                        <span className="ml-auto text-[10px] font-bold bg-destructive/20 text-destructive px-1.5 py-0.5 rounded-full">
+                            {unreadCount}
+                        </span>
+                    )}
+                </button>
+            )}
 
             {/* Dropdown */}
             {open && (
                 <div
                     className={cn(
-                        "absolute z-50 bottom-full left-0 mb-2 bg-popover border border-border rounded-xl shadow-2xl overflow-hidden",
-                        "animate-in fade-in-0 slide-in-from-bottom-2 duration-200",
-                        collapsed ? "w-72" : "w-80"
+                        "absolute z-50 bg-popover border border-border rounded-xl shadow-2xl overflow-hidden",
+                        "animate-in fade-in-0 duration-200",
+                        variant === "topbar"
+                            ? "top-full right-0 mt-2 slide-in-from-top-2 w-[calc(100vw-2rem)] sm:w-80 max-w-[360px]"
+                            : cn("bottom-full left-0 mb-2 slide-in-from-bottom-2", collapsed ? "w-72" : "w-80")
                     )}
-                    style={{ minWidth: "280px" }}
+                    // On mobile topbar, the width might exceed the screen if we just use right-0, so we use max-w and calc
                 >
                     {/* Header */}
                     <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-muted/30">

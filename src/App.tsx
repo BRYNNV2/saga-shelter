@@ -8,6 +8,7 @@ import Index from "./pages/Index";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import BerkasKK from "./pages/BerkasKK";
+import BerkasKTP from "./pages/BerkasKTP";
 import SemuaArsip from "./pages/SemuaArsip";
 import UploadArsip from "./pages/UploadArsip";
 import Pengaturan from "./pages/Pengaturan";
@@ -41,6 +42,14 @@ const App = () => (
               element={
                 <ProtectedRoute>
                   <BerkasKK />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/dashboard/berkas-ktp"
+              element={
+                <ProtectedRoute>
+                  <BerkasKTP />
                 </ProtectedRoute>
               }
             />
