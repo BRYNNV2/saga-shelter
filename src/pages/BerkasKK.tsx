@@ -593,7 +593,7 @@ const BerkasKK = () => {
                       </div>
                       <div>
                         <p className="font-medium text-foreground">
-                          {record.kepala_keluarga || "Belum discan"}
+                          {record.kepala_keluarga || (record.status === "scanned" ? "Data tidak lengkap" : "Belum discan")}
                         </p>
                         <p className="text-sm text-muted-foreground">
                           {record.no_kk

@@ -16,139 +16,182 @@ serve(async (req) => {
 
   try {
     const { imageUrl, recordId } = await req.json();
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY is not configured");
+    const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
+    if (!GEMINI_API_KEY) throw new Error("GEMINI_API_KEY is not configured");
 
-    const authHeader = req.headers.get("Authorization");
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Call AI with image for OCR
+    // Call Google Gemini API with image for OCR
     const aiResponse = await fetch(
-      "https://ai.gateway.lovable.dev/v1/chat/completions",
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
       {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${LOVABLE_API_KEY}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: "google/gemini-2.5-flash",
-          messages: [
+          contents: [
             {
-              role: "system",
-              content: `Kamu adalah OCR expert untuk dokumen Kartu Keluarga (KK) Indonesia. Ekstrak data dari gambar KK yang diberikan. Gunakan tool yang disediakan untuk mengembalikan data terstruktur.`,
-            },
-            {
-              role: "user",
-              content: [
+              parts: [
                 {
-                  type: "text",
-                  text: "Ekstrak semua data dari gambar Kartu Keluarga ini. Pastikan semua field terisi seakurat mungkin.",
+                  text: `Kamu adalah OCR expert untuk dokumen Kartu Keluarga (KK) Indonesia.
+Ekstrak semua data dari gambar Kartu Keluarga ini dan kembalikan HANYA dalam format JSON berikut (tanpa markdown, tanpa kode block):
+{
+  "no_kk": "16 digit nomor KK",
+  "kepala_keluarga": "nama kepala keluarga",
+  "alamat": "alamat lengkap",
+  "rt_rw": "RT/RW",
+  "kelurahan": "kelurahan/desa",
+  "kecamatan": "kecamatan",
+  "kabupaten": "kabupaten/kota",
+  "provinsi": "provinsi",
+  "anggota": [
+    {
+      "nama": "nama anggota",
+      "nik": "16 digit NIK",
+      "jenis_kelamin": "Laki-laki/Perempuan",
+      "tempat_lahir": "tempat lahir",
+      "tanggal_lahir": "tanggal lahir",
+      "agama": "agama",
+      "pendidikan": "pendidikan",
+      "pekerjaan": "pekerjaan",
+      "status_perkawinan": "status perkawinan",
+      "hubungan_keluarga": "hubungan keluarga",
+      "kewarganegaraan": "WNI/WNA"
+    }
+  ]
+}
+Jika ada data yang tidak terbaca, isi dengan string kosong "". Pastikan field anggota selalu berupa array.`,
                 },
                 {
-                  type: "image_url",
-                  image_url: { url: imageUrl },
+                  inline_data: null,
                 },
               ],
             },
           ],
-          tools: [
-            {
-              type: "function",
-              function: {
-                name: "extract_kk_data",
-                description:
-                  "Extract structured data from a Kartu Keluarga document",
-                parameters: {
-                  type: "object",
-                  properties: {
-                    no_kk: {
-                      type: "string",
-                      description: "Nomor Kartu Keluarga (16 digit)",
-                    },
-                    kepala_keluarga: {
-                      type: "string",
-                      description: "Nama Kepala Keluarga",
-                    },
-                    alamat: { type: "string", description: "Alamat lengkap" },
-                    rt_rw: { type: "string", description: "RT/RW" },
-                    kelurahan: {
-                      type: "string",
-                      description: "Kelurahan/Desa",
-                    },
-                    kecamatan: { type: "string", description: "Kecamatan" },
-                    kabupaten: {
-                      type: "string",
-                      description: "Kabupaten/Kota",
-                    },
-                    provinsi: { type: "string", description: "Provinsi" },
-                    anggota: {
-                      type: "array",
-                      description: "Daftar anggota keluarga",
-                      items: {
-                        type: "object",
-                        properties: {
-                          nama: { type: "string" },
-                          nik: { type: "string" },
-                          jenis_kelamin: { type: "string" },
-                          tempat_lahir: { type: "string" },
-                          tanggal_lahir: { type: "string" },
-                          agama: { type: "string" },
-                          pendidikan: { type: "string" },
-                          pekerjaan: { type: "string" },
-                          status_perkawinan: { type: "string" },
-                          hubungan_keluarga: { type: "string" },
-                          kewarganegaraan: { type: "string" },
-                        },
-                        required: ["nama", "nik", "hubungan_keluarga"],
-                        additionalProperties: false,
-                      },
-                    },
-                  },
-                  required: ["no_kk", "kepala_keluarga", "anggota"],
-                  additionalProperties: false,
-                },
-              },
-            },
-          ],
-          tool_choice: {
-            type: "function",
-            function: { name: "extract_kk_data" },
+          generationConfig: {
+            temperature: 0.1,
+            maxOutputTokens: 4096,
           },
         }),
       }
     );
 
-    if (!aiResponse.ok) {
-      const errText = await aiResponse.text();
-      console.error("AI error:", aiResponse.status, errText);
+    // Kalau imageUrl adalah URL publik, gunakan file_data; jika tidak, download dulu
+    let imageData: string;
+    let imageMimeType: string = "image/jpeg";
 
-      if (aiResponse.status === 429) {
+    // Download gambar dan convert ke base64
+    const imgResponse = await fetch(imageUrl);
+    if (!imgResponse.ok) throw new Error("Gagal mengunduh gambar");
+    const imgBuffer = await imgResponse.arrayBuffer();
+    const imgBytes = new Uint8Array(imgBuffer);
+    imageData = btoa(String.fromCharCode(...imgBytes));
+
+    // Detect mime type dari URL
+    if (imageUrl.toLowerCase().includes(".png")) imageMimeType = "image/png";
+    else if (imageUrl.toLowerCase().includes(".webp")) imageMimeType = "image/webp";
+    else if (imageUrl.toLowerCase().includes(".jpg") || imageUrl.toLowerCase().includes(".jpeg")) imageMimeType = "image/jpeg";
+
+    // Re-build request dengan data gambar
+    const finalAiResponse = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [
+                {
+                  text: `Kamu adalah OCR expert untuk dokumen Kartu Keluarga (KK) Indonesia.
+Ekstrak semua data dari gambar Kartu Keluarga ini dan kembalikan HANYA dalam format JSON berikut (tanpa markdown, tanpa kode block, tanpa penjelasan tambahan):
+{
+  "no_kk": "16 digit nomor KK",
+  "kepala_keluarga": "nama kepala keluarga",
+  "alamat": "alamat lengkap",
+  "rt_rw": "RT/RW",
+  "kelurahan": "kelurahan/desa",
+  "kecamatan": "kecamatan",
+  "kabupaten": "kabupaten/kota",
+  "provinsi": "provinsi",
+  "anggota": [
+    {
+      "nama": "nama anggota",
+      "nik": "16 digit NIK",
+      "jenis_kelamin": "Laki-laki/Perempuan",
+      "tempat_lahir": "tempat lahir",
+      "tanggal_lahir": "tanggal lahir",
+      "agama": "agama",
+      "pendidikan": "pendidikan",
+      "pekerjaan": "pekerjaan",
+      "status_perkawinan": "status perkawinan",
+      "hubungan_keluarga": "hubungan keluarga",
+      "kewarganegaraan": "WNI/WNA"
+    }
+  ]
+}`,
+                },
+                {
+                  inline_data: {
+                    mime_type: imageMimeType,
+                    data: imageData,
+                  },
+                },
+              ],
+            },
+          ],
+          generationConfig: {
+            temperature: 0.1,
+            maxOutputTokens: 4096,
+          },
+        }),
+      }
+    );
+
+    if (!finalAiResponse.ok) {
+      const errText = await finalAiResponse.text();
+      console.error("Gemini AI error:", finalAiResponse.status, errText);
+
+      if (finalAiResponse.status === 429) {
         return new Response(
           JSON.stringify({ error: "Terlalu banyak permintaan, coba lagi nanti." }),
           { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
-      if (aiResponse.status === 402) {
-        return new Response(
-          JSON.stringify({ error: "Kredit AI habis, silakan tambah kredit." }),
-          { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
 
-      throw new Error(`AI gateway error: ${aiResponse.status}`);
+      throw new Error(`Gemini API error: ${finalAiResponse.status} - ${errText}`);
     }
 
-    const aiData = await aiResponse.json();
-    const toolCall = aiData.choices?.[0]?.message?.tool_calls?.[0];
+    const aiData = await finalAiResponse.json();
+    const rawText = aiData.candidates?.[0]?.content?.parts?.[0]?.text;
 
-    if (!toolCall) {
-      throw new Error("AI did not return structured data");
+    if (!rawText) {
+      throw new Error("AI tidak mengembalikan data");
     }
 
-    const extractedData = JSON.parse(toolCall.function.arguments);
+    // Parse JSON dari respons AI (hapus markdown jika ada)
+    let extractedData: any;
+    try {
+      // Bersihkan jika ada markdown code block
+      const cleaned = rawText
+        .replace(/```json\n?/gi, "")
+        .replace(/```\n?/g, "")
+        .trim();
+      extractedData = JSON.parse(cleaned);
+    } catch (e) {
+      console.error("Failed to parse AI response:", rawText);
+      throw new Error("Gagal memproses respons AI: format tidak valid");
+    }
+
+    // Pastikan anggota adalah array
+    if (!Array.isArray(extractedData.anggota)) {
+      extractedData.anggota = [];
+    }
 
     // Update the record in the database
     const { error: updateError } = await supabase

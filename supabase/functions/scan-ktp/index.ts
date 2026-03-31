@@ -1,10 +1,7 @@
 /* eslint-disable */
-// @ts-ignore
+// @ts-nocheck
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-// @ts-ignore
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-
-declare const Deno: any;
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -12,85 +9,77 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-serve(async (req: any) => {
+serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
     const { imageUrl, recordId } = await req.json();
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY is not configured");
+    const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
+    if (!GEMINI_API_KEY) throw new Error("GEMINI_API_KEY is not configured");
 
-    const authHeader = req.headers.get("Authorization");
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Call AI with image for OCR
+    // Download gambar dan convert ke base64
+    const imgResponse = await fetch(imageUrl);
+    if (!imgResponse.ok) throw new Error("Gagal mengunduh gambar");
+    const imgBuffer = await imgResponse.arrayBuffer();
+    const imgBytes = new Uint8Array(imgBuffer);
+    const imageData = btoa(String.fromCharCode(...imgBytes));
+
+    // Detect mime type dari URL
+    let imageMimeType = "image/jpeg";
+    if (imageUrl.toLowerCase().includes(".png")) imageMimeType = "image/png";
+    else if (imageUrl.toLowerCase().includes(".webp")) imageMimeType = "image/webp";
+
+    // Call Google Gemini API
     const aiResponse = await fetch(
-      "https://ai.gateway.lovable.dev/v1/chat/completions",
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
       {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${LOVABLE_API_KEY}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: "google/gemini-2.5-flash",
-          messages: [
+          contents: [
             {
-              role: "system",
-              content: `Kamu adalah OCR expert untuk dokumen Kartu Tanda Penduduk (KTP) Indonesia. Ekstrak data dari gambar KTP yang diberikan. Gunakan tool yang disediakan untuk mengembalikan data terstruktur secara presisi tanpa tambahan teks.`,
-            },
-            {
-              role: "user",
-              content: [
+              parts: [
                 {
-                  type: "text",
-                  text: "Ekstrak semua data inti dari gambar Kartu Tanda Penduduk ini secara lengkap. Pastikan NIK, Nama, Tanggal Lahir hingga Pekerjaan terisi dengan akurat sesuai di gambar.",
+                  text: `Kamu adalah OCR expert untuk dokumen Kartu Tanda Penduduk (KTP) Indonesia.
+Ekstrak semua data dari gambar KTP ini dan kembalikan HANYA dalam format JSON berikut (tanpa markdown, tanpa kode block, tanpa penjelasan tambahan):
+{
+  "nik": "16 digit NIK",
+  "nama": "nama lengkap",
+  "tempat_lahir": "tempat lahir",
+  "tanggal_lahir": "tanggal lahir format DD-MM-YYYY",
+  "jenis_kelamin": "LAKI-LAKI atau PEREMPUAN",
+  "golongan_darah": "A/B/AB/O/-",
+  "alamat": "alamat tempat tinggal",
+  "rt_rw": "RT/RW seperti 001/002",
+  "kelurahan": "kelurahan/desa",
+  "kecamatan": "kecamatan",
+  "agama": "agama",
+  "status_perkawinan": "status perkawinan",
+  "pekerjaan": "pekerjaan",
+  "kewarganegaraan": "WNI atau WNA"
+}
+Jika ada data yang tidak terbaca, isi dengan string kosong "".`,
                 },
                 {
-                  type: "image_url",
-                  image_url: { url: imageUrl },
+                  inline_data: {
+                    mime_type: imageMimeType,
+                    data: imageData,
+                  },
                 },
               ],
             },
           ],
-          tools: [
-            {
-              type: "function",
-              function: {
-                name: "extract_ktp_data",
-                description:
-                  "Extract structured data from a Kartu Tanda Penduduk document",
-                parameters: {
-                  type: "object",
-                  properties: {
-                    nik: { type: "string", description: "Nomor Induk Kependudukan (16 digit)" },
-                    nama: { type: "string", description: "Nama Lengkap" },
-                    tempat_lahir: { type: "string", description: "Tempat Lahir" },
-                    tanggal_lahir: { type: "string", description: "Tanggal Lahir format DD-MM-YYYY" },
-                    jenis_kelamin: { type: "string", description: "LAKI-LAKI atau PEREMPUAN" },
-                    golongan_darah: { type: "string", description: "A, B, AB, O, atau -" },
-                    alamat: { type: "string", description: "Alamat tempat tinggal" },
-                    rt_rw: { type: "string", description: "RT/RW" },
-                    kelurahan: { type: "string", description: "Kel/Desa" },
-                    kecamatan: { type: "string", description: "Kecamatan" },
-                    agama: { type: "string", description: "Agama" },
-                    status_perkawinan: { type: "string", description: "Status Perkawinan" },
-                    pekerjaan: { type: "string", description: "Pekerjaan" },
-                    kewarganegaraan: { type: "string", description: "WNI atau WNA" },
-                  },
-                  required: ["nik", "nama"],
-                  additionalProperties: false,
-                },
-              },
-            },
-          ],
-          tool_choice: {
-            type: "function",
-            function: { name: "extract_ktp_data" },
+          generationConfig: {
+            temperature: 0.1,
+            maxOutputTokens: 2048,
           },
         }),
       }
@@ -98,7 +87,7 @@ serve(async (req: any) => {
 
     if (!aiResponse.ok) {
       const errText = await aiResponse.text();
-      console.error("AI error:", aiResponse.status, errText);
+      console.error("Gemini AI error:", aiResponse.status, errText);
 
       if (aiResponse.status === 429) {
         return new Response(
@@ -106,24 +95,29 @@ serve(async (req: any) => {
           { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
-      if (aiResponse.status === 402) {
-        return new Response(
-          JSON.stringify({ error: "Kredit AI habis, silakan tambah kredit." }),
-          { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
 
-      throw new Error(`AI gateway error: ${aiResponse.status}`);
+      throw new Error(`Gemini API error: ${aiResponse.status} - ${errText}`);
     }
 
     const aiData = await aiResponse.json();
-    const toolCall = aiData.choices?.[0]?.message?.tool_calls?.[0];
+    const rawText = aiData.candidates?.[0]?.content?.parts?.[0]?.text;
 
-    if (!toolCall) {
-      throw new Error("AI did not return structured data");
+    if (!rawText) {
+      throw new Error("AI tidak mengembalikan data");
     }
 
-    const extractedData = JSON.parse(toolCall.function.arguments);
+    // Parse JSON dari respons AI
+    let extractedData: any;
+    try {
+      const cleaned = rawText
+        .replace(/```json\n?/gi, "")
+        .replace(/```\n?/g, "")
+        .trim();
+      extractedData = JSON.parse(cleaned);
+    } catch (e) {
+      console.error("Failed to parse AI response:", rawText);
+      throw new Error("Gagal memproses respons AI: format tidak valid");
+    }
 
     // Update the record in the database
     const { error: updateError } = await supabase
