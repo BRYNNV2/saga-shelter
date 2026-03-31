@@ -13,6 +13,7 @@ export interface PrintOptions {
     title: string;
     subtitle?: string;
     columns: PrintColumn[];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     data: Record<string, any>[];
     footer?: string;
 }

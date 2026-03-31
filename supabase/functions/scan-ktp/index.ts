@@ -1,7 +1,10 @@
 /* eslint-disable */
-// @ts-nocheck
+// @ts-ignore
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+// @ts-ignore
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+declare const Deno: any;
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -9,7 +12,7 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-serve(async (req) => {
+serve(async (req: any) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
@@ -38,14 +41,14 @@ serve(async (req) => {
           messages: [
             {
               role: "system",
-              content: `Kamu adalah OCR expert untuk dokumen Kartu Keluarga (KK) Indonesia. Ekstrak data dari gambar KK yang diberikan. Gunakan tool yang disediakan untuk mengembalikan data terstruktur.`,
+              content: `Kamu adalah OCR expert untuk dokumen Kartu Tanda Penduduk (KTP) Indonesia. Ekstrak data dari gambar KTP yang diberikan. Gunakan tool yang disediakan untuk mengembalikan data terstruktur secara presisi tanpa tambahan teks.`,
             },
             {
               role: "user",
               content: [
                 {
                   type: "text",
-                  text: "Ekstrak semua data dari gambar Kartu Keluarga ini. Pastikan semua field terisi seakurat mungkin.",
+                  text: "Ekstrak semua data inti dari gambar Kartu Tanda Penduduk ini secara lengkap. Pastikan NIK, Nama, Tanggal Lahir hingga Pekerjaan terisi dengan akurat sesuai di gambar.",
                 },
                 {
                   type: "image_url",
@@ -58,56 +61,28 @@ serve(async (req) => {
             {
               type: "function",
               function: {
-                name: "extract_kk_data",
+                name: "extract_ktp_data",
                 description:
-                  "Extract structured data from a Kartu Keluarga document",
+                  "Extract structured data from a Kartu Tanda Penduduk document",
                 parameters: {
                   type: "object",
                   properties: {
-                    no_kk: {
-                      type: "string",
-                      description: "Nomor Kartu Keluarga (16 digit)",
-                    },
-                    kepala_keluarga: {
-                      type: "string",
-                      description: "Nama Kepala Keluarga",
-                    },
-                    alamat: { type: "string", description: "Alamat lengkap" },
+                    nik: { type: "string", description: "Nomor Induk Kependudukan (16 digit)" },
+                    nama: { type: "string", description: "Nama Lengkap" },
+                    tempat_lahir: { type: "string", description: "Tempat Lahir" },
+                    tanggal_lahir: { type: "string", description: "Tanggal Lahir format DD-MM-YYYY" },
+                    jenis_kelamin: { type: "string", description: "LAKI-LAKI atau PEREMPUAN" },
+                    golongan_darah: { type: "string", description: "A, B, AB, O, atau -" },
+                    alamat: { type: "string", description: "Alamat tempat tinggal" },
                     rt_rw: { type: "string", description: "RT/RW" },
-                    kelurahan: {
-                      type: "string",
-                      description: "Kelurahan/Desa",
-                    },
+                    kelurahan: { type: "string", description: "Kel/Desa" },
                     kecamatan: { type: "string", description: "Kecamatan" },
-                    kabupaten: {
-                      type: "string",
-                      description: "Kabupaten/Kota",
-                    },
-                    provinsi: { type: "string", description: "Provinsi" },
-                    anggota: {
-                      type: "array",
-                      description: "Daftar anggota keluarga",
-                      items: {
-                        type: "object",
-                        properties: {
-                          nama: { type: "string" },
-                          nik: { type: "string" },
-                          jenis_kelamin: { type: "string" },
-                          tempat_lahir: { type: "string" },
-                          tanggal_lahir: { type: "string" },
-                          agama: { type: "string" },
-                          pendidikan: { type: "string" },
-                          pekerjaan: { type: "string" },
-                          status_perkawinan: { type: "string" },
-                          hubungan_keluarga: { type: "string" },
-                          kewarganegaraan: { type: "string" },
-                        },
-                        required: ["nama", "nik", "hubungan_keluarga"],
-                        additionalProperties: false,
-                      },
-                    },
+                    agama: { type: "string", description: "Agama" },
+                    status_perkawinan: { type: "string", description: "Status Perkawinan" },
+                    pekerjaan: { type: "string", description: "Pekerjaan" },
+                    kewarganegaraan: { type: "string", description: "WNI atau WNA" },
                   },
-                  required: ["no_kk", "kepala_keluarga", "anggota"],
+                  required: ["nik", "nama"],
                   additionalProperties: false,
                 },
               },
@@ -115,7 +90,7 @@ serve(async (req) => {
           ],
           tool_choice: {
             type: "function",
-            function: { name: "extract_kk_data" },
+            function: { name: "extract_ktp_data" },
           },
         }),
       }
@@ -152,17 +127,22 @@ serve(async (req) => {
 
     // Update the record in the database
     const { error: updateError } = await supabase
-      .from("kk_records")
+      .from("ktp_records")
       .update({
-        no_kk: extractedData.no_kk || null,
-        kepala_keluarga: extractedData.kepala_keluarga || null,
+        nik: extractedData.nik || null,
+        nama: extractedData.nama || null,
+        tempat_lahir: extractedData.tempat_lahir || null,
+        tanggal_lahir: extractedData.tanggal_lahir || null,
+        jenis_kelamin: extractedData.jenis_kelamin || null,
+        golongan_darah: extractedData.golongan_darah || null,
         alamat: extractedData.alamat || null,
         rt_rw: extractedData.rt_rw || null,
         kelurahan: extractedData.kelurahan || null,
         kecamatan: extractedData.kecamatan || null,
-        kabupaten: extractedData.kabupaten || null,
-        provinsi: extractedData.provinsi || null,
-        anggota: extractedData.anggota || [],
+        agama: extractedData.agama || null,
+        status_perkawinan: extractedData.status_perkawinan || null,
+        pekerjaan: extractedData.pekerjaan || null,
+        kewarganegaraan: extractedData.kewarganegaraan || null,
         status: "scanned",
       })
       .eq("id", recordId);
@@ -176,7 +156,7 @@ serve(async (req) => {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {
-    console.error("scan-kk error:", e);
+    console.error("scan-ktp error:", e);
     return new Response(
       JSON.stringify({ error: e instanceof Error ? e.message : "Unknown error" }),
       {

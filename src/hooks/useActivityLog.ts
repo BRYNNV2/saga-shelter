@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useCallback } from "react";
@@ -12,7 +13,7 @@ export type ActivityAction =
     | "export"
     | "login";
 
-export type EntityType = "arsip" | "kk" | "system";
+export type EntityType = "arsip" | "kk" | "ktp" | "system";
 
 interface LogParams {
     action: ActivityAction;

@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import DashboardSidebar from "@/components/DashboardSidebar";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
@@ -22,6 +23,7 @@ import {
   X,
   Save,
   Printer,
+  Camera,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -50,6 +52,7 @@ const BerkasKTP = () => {
   const [viewRecord, setViewRecord] = useState<any>(null);
   const [editRecord, setEditRecord] = useState<any>(null);
   const [savingEdit, setSavingEdit] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
 
   // Helper — open edit dialog with a deep copy
   const openEdit = (rec: any) => {
@@ -68,6 +71,10 @@ const BerkasKTP = () => {
       return data;
     },
   });
+
+  const itemsPerPage = 10;
+  const totalPages = Math.ceil(records.length / itemsPerPage);
+  const currentRecords = records.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
   // Upload handler
   const handleUpload = useCallback(
@@ -118,7 +125,7 @@ const BerkasKTP = () => {
         e.target.value = "";
       }
     },
-    [user, toast, queryClient]
+    [user, toast, queryClient, log]
   );
 
   // Scan mutation
@@ -147,6 +154,61 @@ const BerkasKTP = () => {
     },
     onSettled: () => setScanningId(null),
   });
+
+  // Camera capture and auto-scan
+  const handleCameraCapture = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = e.target.files;
+      if (!files || !user) return;
+      const file = files[0];
+      if (!file) return;
+
+      setUploading(true);
+      try {
+        const ext = file.name.split(".").pop();
+        const fileName = `${user.id}/${Date.now()}_camera.${ext}`;
+
+        const { error: uploadError } = await supabase.storage
+          .from("documents")
+          .upload(fileName, file);
+
+        if (uploadError) throw uploadError;
+
+        const { data: urlData } = supabase.storage
+          .from("documents")
+          .getPublicUrl(fileName);
+
+        const { data: newRecord, error: insertError } = await supabase
+          .from("ktp_records")
+          .insert({
+            user_id: user.id,
+            image_url: urlData.publicUrl,
+            status: "pending",
+          })
+          .select()
+          .single();
+
+        if (insertError) throw insertError;
+
+        toast({ title: "Berhasil foto", description: "Memulai proses OCR langsung..." });
+        queryClient.invalidateQueries({ queryKey: ["ktp-records"] });
+        log({ action: "upload", entityType: "ktp", description: `Mengambil foto KTP untuk OCR` });
+
+        scanMutation.mutate(newRecord);
+
+      } catch (err: any) {
+        toast({
+          title: "Gagal memproses",
+          description: err.message,
+          variant: "destructive",
+        });
+      } finally {
+        setUploading(false);
+        e.target.value = "";
+      }
+    },
+    [user, toast, queryClient, log, scanMutation]
+  );
 
   // Delete mutation
   const deleteMutation = useMutation({
@@ -216,31 +278,41 @@ const BerkasKTP = () => {
         const arrayBuffer = await file.arrayBuffer();
         const wb = XLSX.read(arrayBuffer, { type: "array" });
 
+        const normalizeRow = (row: any) => {
+          const normalized: any = {};
+          if (row) {
+            Object.keys(row).forEach((key) => {
+              normalized[String(key).trim().toLowerCase()] = row[key];
+            });
+          }
+          return normalized;
+        };
+
         const ktpSheetName = wb.SheetNames.find((n) => n.toLowerCase().includes("ktp")) || wb.SheetNames[0];
         const ktpSheet = wb.Sheets[ktpSheetName];
-        const ktpRows: any[] = XLSX.utils.sheet_to_json(ktpSheet);
+        const ktpRows: any[] = XLSX.utils.sheet_to_json(ktpSheet).map(normalizeRow);
 
         let imported = 0;
         for (const row of ktpRows) {
-          const nik = row["NIK"] || row["nik"] || "";
+          const nik = row["nik"] || row["no ktp"] || row["nomor ktp"] || "";
           
           const { error: insertError } = await supabase.from("ktp_records").insert({
             user_id: user.id,
             image_url: "",
             nik: String(nik),
-            nama: row["Nama"] || row["nama"] || "",
-            tempat_lahir: row["Tempat Lahir"] || row["tempat_lahir"] || "",
-            tanggal_lahir: row["Tanggal Lahir"] || row["tanggal_lahir"] || "",
-            jenis_kelamin: row["Jenis Kelamin"] || row["jenis_kelamin"] || "",
-            golongan_darah: row["Golongan Darah"] || row["golongan_darah"] || "",
-            alamat: row["Alamat"] || row["alamat"] || "",
-            rt_rw: row["RT/RW"] || row["rt_rw"] || "",
-            kelurahan: row["Kelurahan"] || row["kelurahan"] || "",
-            kecamatan: row["Kecamatan"] || row["kecamatan"] || "",
-            agama: row["Agama"] || row["agama"] || "",
-            status_perkawinan: row["Status Perkawinan"] || row["status_perkawinan"] || "",
-            pekerjaan: row["Pekerjaan"] || row["pekerjaan"] || "",
-            kewarganegaraan: row["Kewarganegaraan"] || row["kewarganegaraan"] || "",
+            nama: row["nama"] || row["nama lengkap"] || "",
+            tempat_lahir: row["tempat lahir"] || row["tempat_lahir"] || "",
+            tanggal_lahir: row["tanggal lahir"] || row["tanggal_lahir"] || row["tgl lahir"] || "",
+            jenis_kelamin: row["jenis kelamin"] || row["jenis_kelamin"] || row["jk"] || "",
+            golongan_darah: row["golongan darah"] || row["gol_darah"] || row["goldar"] || "",
+            alamat: row["alamat"] || row["alamat lengkap"] || "",
+            rt_rw: row["rt/rw"] || row["rt rw"] || row["rtrw"] || "",
+            kelurahan: row["kelurahan"] || row["desa"] || row["kel/desa"] || "",
+            kecamatan: row["kecamatan"] || "",
+            agama: row["agama"] || "",
+            status_perkawinan: row["status perkawinan"] || row["status kawin"] || row["perkawinan"] || "",
+            pekerjaan: row["pekerjaan"] || row["profesi"] || "",
+            kewarganegaraan: row["kewarganegaraan"] || row["wni/wna"] || row["status kewarganegaraan"] || "",
             status: "scanned",
           });
 
@@ -303,14 +375,14 @@ const BerkasKTP = () => {
       <main className="flex-1 overflow-auto">
         {/* Header */}
         <header className="sticky top-0 z-10 bg-background/80 backdrop-blur-sm border-b border-border px-6 py-4">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 sm:gap-0">
             <div>
               <h1 className="text-2xl font-bold text-foreground">Berkas KTP</h1>
               <p className="text-sm text-muted-foreground">
                 Scan dan kelola data Kartu Tanda Penduduk
               </p>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-2 sm:gap-3 w-full sm:w-auto">
               <Button
                 variant="outline"
                 onClick={() => {
@@ -380,6 +452,26 @@ const BerkasKTP = () => {
                   disabled={uploading}
                 />
               </label>
+              <label>
+                <Button asChild disabled={uploading}>
+                  <span>
+                    {uploading ? (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    ) : (
+                      <Camera className="h-4 w-4 mr-2" />
+                    )}
+                    Foto KTP (OCR)
+                  </span>
+                </Button>
+                <input
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  className="hidden"
+                  onChange={handleCameraCapture}
+                  disabled={uploading}
+                />
+              </label>
             </div>
           </div>
         </header>
@@ -445,11 +537,12 @@ const BerkasKTP = () => {
                 </p>
               </div>
             ) : (
-              <div className="divide-y divide-border">
-                {records.map((record: any) => (
+              <div>
+                <div className="divide-y divide-border">
+                  {currentRecords.map((record: any) => (
                   <div
                     key={record.id}
-                    className="flex items-center justify-between p-5 hover:bg-muted/50 transition-colors"
+                    className="flex flex-col sm:flex-row sm:items-center justify-between p-5 hover:bg-muted/50 transition-colors gap-4 sm:gap-0"
                   >
                     <div className="flex items-center gap-4">
                       <div className="h-14 w-14 rounded-lg overflow-hidden bg-muted flex-shrink-0">
@@ -472,7 +565,7 @@ const BerkasKTP = () => {
                         </p>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto justify-start sm:justify-end mt-2 sm:mt-0">
                       <Badge
                         variant={record.status === "scanned" ? "default" : "outline"}
                       >
@@ -527,6 +620,32 @@ const BerkasKTP = () => {
                     </div>
                   </div>
                 ))}
+                </div>
+                {totalPages > 1 && (
+                  <div className="flex flex-col sm:flex-row items-center justify-between p-4 border-t border-border gap-4">
+                    <p className="text-sm text-muted-foreground">
+                      Menampilkan {(currentPage - 1) * itemsPerPage + 1} - {Math.min(currentPage * itemsPerPage, records.length)} dari {records.length} berkas
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                        disabled={currentPage === 1}
+                      >
+                        Sebelumnya
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                        disabled={currentPage === totalPages}
+                      >
+                        Selanjutnya
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -552,7 +671,7 @@ const BerkasKTP = () => {
               )}
 
               {/* Field info */}
-              <div className="grid grid-cols-2 gap-4 text-sm">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
                 {[
                   { label: "NIK", val: viewRecord.nik },
                   { label: "Nama Lengkap", val: viewRecord.nama },

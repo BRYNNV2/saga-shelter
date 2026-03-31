@@ -107,6 +107,78 @@ export type Database = {
         }
         Relationships: []
       }
+      ktp_records: {
+        Row: {
+          agama: string | null
+          alamat: string | null
+          created_at: string
+          golongan_darah: string | null
+          id: string
+          image_url: string
+          jenis_kelamin: string | null
+          kecamatan: string | null
+          kelurahan: string | null
+          kewarganegaraan: string | null
+          nama: string | null
+          nik: string | null
+          pekerjaan: string | null
+          raw_text: string | null
+          rt_rw: string | null
+          status: string
+          status_perkawinan: string | null
+          tanggal_lahir: string | null
+          tempat_lahir: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          agama?: string | null
+          alamat?: string | null
+          created_at?: string
+          golongan_darah?: string | null
+          id?: string
+          image_url: string
+          jenis_kelamin?: string | null
+          kecamatan?: string | null
+          kelurahan?: string | null
+          kewarganegaraan?: string | null
+          nama?: string | null
+          nik?: string | null
+          pekerjaan?: string | null
+          raw_text?: string | null
+          rt_rw?: string | null
+          status?: string
+          status_perkawinan?: string | null
+          tanggal_lahir?: string | null
+          tempat_lahir?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          agama?: string | null
+          alamat?: string | null
+          created_at?: string
+          golongan_darah?: string | null
+          id?: string
+          image_url?: string
+          jenis_kelamin?: string | null
+          kecamatan?: string | null
+          kelurahan?: string | null
+          kewarganegaraan?: string | null
+          nama?: string | null
+          nik?: string | null
+          pekerjaan?: string | null
+          raw_text?: string | null
+          rt_rw?: string | null
+          status?: string
+          status_perkawinan?: string | null
+          tanggal_lahir?: string | null
+          tempat_lahir?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           created_at: string

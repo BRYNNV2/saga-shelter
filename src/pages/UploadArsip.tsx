@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import DashboardSidebar from "@/components/DashboardSidebar";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
@@ -290,14 +291,14 @@ const UploadArsip = () => {
             <main className="flex-1 overflow-auto">
                 {/* Header */}
                 <header className="sticky top-0 z-10 bg-background/80 backdrop-blur-sm border-b border-border px-6 py-4">
-                    <div className="flex items-center justify-between">
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 sm:gap-0">
                         <div>
                             <h1 className="text-2xl font-bold text-foreground">Upload Arsip</h1>
                             <p className="text-sm text-muted-foreground">
                                 Unggah dokumen arsip ke sistem penyimpanan
                             </p>
                         </div>
-                        <div className="flex items-center gap-3">
+                        <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto mt-2 sm:mt-0">
                             {successCount > 0 && (
                                 <Button variant="outline" onClick={clearCompleted}>
                                     <Trash2 className="h-4 w-4 mr-2" />

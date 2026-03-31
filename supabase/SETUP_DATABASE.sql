@@ -16,10 +16,15 @@ CREATE TABLE IF NOT EXISTS public.profiles (
 
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Users can view own profile" ON public.profiles;
 CREATE POLICY "Users can view own profile"
   ON public.profiles FOR SELECT USING (auth.uid() = id);
+
+DROP POLICY IF EXISTS "Users can insert own profile" ON public.profiles;
 CREATE POLICY "Users can insert own profile"
   ON public.profiles FOR INSERT WITH CHECK (auth.uid() = id);
+
+DROP POLICY IF EXISTS "Users can update own profile" ON public.profiles;
 CREATE POLICY "Users can update own profile"
   ON public.profiles FOR UPDATE USING (auth.uid() = id);
 
@@ -73,12 +78,19 @@ CREATE TABLE IF NOT EXISTS public.archives (
 
 ALTER TABLE public.archives ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Users can view own archives" ON public.archives;
 CREATE POLICY "Users can view own archives"
   ON public.archives FOR SELECT USING (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Users can insert own archives" ON public.archives;
 CREATE POLICY "Users can insert own archives"
   ON public.archives FOR INSERT WITH CHECK (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Users can update own archives" ON public.archives;
 CREATE POLICY "Users can update own archives"
   ON public.archives FOR UPDATE USING (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Users can delete own archives" ON public.archives;
 CREATE POLICY "Users can delete own archives"
   ON public.archives FOR DELETE USING (auth.uid() = user_id);
 
@@ -137,12 +149,19 @@ CREATE TABLE IF NOT EXISTS public.kk_records (
 
 ALTER TABLE public.kk_records ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Users can view own kk_records" ON public.kk_records;
 CREATE POLICY "Users can view own kk_records"
   ON public.kk_records FOR SELECT USING (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Users can insert own kk_records" ON public.kk_records;
 CREATE POLICY "Users can insert own kk_records"
   ON public.kk_records FOR INSERT WITH CHECK (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Users can update own kk_records" ON public.kk_records;
 CREATE POLICY "Users can update own kk_records"
   ON public.kk_records FOR UPDATE USING (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Users can delete own kk_records" ON public.kk_records;
 CREATE POLICY "Users can delete own kk_records"
   ON public.kk_records FOR DELETE USING (auth.uid() = user_id);
 
@@ -181,12 +200,19 @@ CREATE TABLE IF NOT EXISTS public.ktp_records (
 
 ALTER TABLE public.ktp_records ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Users can view own ktp_records" ON public.ktp_records;
 CREATE POLICY "Users can view own ktp_records"
   ON public.ktp_records FOR SELECT USING (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Users can insert own ktp_records" ON public.ktp_records;
 CREATE POLICY "Users can insert own ktp_records"
   ON public.ktp_records FOR INSERT WITH CHECK (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Users can update own ktp_records" ON public.ktp_records;
 CREATE POLICY "Users can update own ktp_records"
   ON public.ktp_records FOR UPDATE USING (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Users can delete own ktp_records" ON public.ktp_records;
 CREATE POLICY "Users can delete own ktp_records"
   ON public.ktp_records FOR DELETE USING (auth.uid() = user_id);
 
@@ -212,8 +238,11 @@ CREATE TABLE IF NOT EXISTS public.activity_logs (
 
 ALTER TABLE public.activity_logs ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Users can view own activity_logs" ON public.activity_logs;
 CREATE POLICY "Users can view own activity_logs"
   ON public.activity_logs FOR SELECT USING (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Users can insert own activity_logs" ON public.activity_logs;
 CREATE POLICY "Users can insert own activity_logs"
   ON public.activity_logs FOR INSERT WITH CHECK (auth.uid() = user_id);
 
@@ -227,7 +256,12 @@ CREATE INDEX IF NOT EXISTS idx_activity_logs_entity     ON public.activity_logs(
 -- ─────────────────────────────────────────
 -- 7. AKTIFKAN REALTIME (notifikasi live)
 -- ─────────────────────────────────────────
-ALTER PUBLICATION supabase_realtime ADD TABLE public.activity_logs;
+DO $$
+BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE public.activity_logs;
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
 
 
 -- ─────────────────────────────────────────

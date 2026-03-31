@@ -100,12 +100,12 @@ const Dashboard = () => {
       <main className="flex-1 overflow-auto">
         {/* Top Bar */}
         <header className="sticky top-0 z-10 bg-background/80 backdrop-blur-sm border-b border-border px-6 py-4">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 md:gap-0">
             <div>
               <h1 className="text-2xl font-bold text-foreground">Dashboard</h1>
               <p className="text-sm text-muted-foreground">Selamat datang, {displayName}</p>
             </div>
-            <div className="flex items-center gap-4">
+            <div className="flex flex-wrap items-center gap-4 w-full md:w-auto mt-2 md:mt-0 justify-end md:justify-start">
               <div className="relative hidden md:block">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input placeholder="Cari arsip..." className="pl-9 w-64 h-9" />

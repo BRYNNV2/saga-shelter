@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import DashboardSidebar from "@/components/DashboardSidebar";
 import { supabase } from "@/integrations/supabase/client";
 import { useQuery } from "@tanstack/react-query";
@@ -223,15 +224,15 @@ const Laporan = () => {
             <main className="flex-1 overflow-auto">
                 {/* Header */}
                 <header className="sticky top-0 z-10 bg-background/80 backdrop-blur-sm border-b border-border px-6 py-4">
-                    <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
+                    <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 md:gap-0">
+                        <div className="flex items-center gap-3 w-full md:w-auto mt-2 md:mt-0">
                             <BarChart2 className="h-6 w-6 text-muted-foreground" />
                             <div>
                                 <h1 className="text-2xl font-bold text-foreground">Laporan & Statistik</h1>
                                 <p className="text-sm text-muted-foreground">Visualisasi data arsip dan berkas KK</p>
                             </div>
                         </div>
-                        <div className="flex items-center gap-3">
+                        <div className="flex flex-wrap items-center gap-3 w-full md:w-auto mt-2 md:mt-0">
                             <Select value={rangeMonths} onValueChange={setRangeMonths}>
                                 <SelectTrigger className="w-36">
                                     <SelectValue />

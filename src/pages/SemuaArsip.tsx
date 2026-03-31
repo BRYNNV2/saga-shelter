@@ -2,6 +2,7 @@ import DashboardSidebar from "@/components/DashboardSidebar";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState } from "react";
 import { useActivityLog } from "@/hooks/useActivityLog";
 import { useCategories } from "@/hooks/useCategories";
@@ -232,14 +233,14 @@ const SemuaArsip = () => {
             <main className="flex-1 overflow-auto">
                 {/* Header */}
                 <header className="sticky top-0 z-10 bg-background/80 backdrop-blur-sm border-b border-border px-6 py-4">
-                    <div className="flex items-center justify-between">
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 sm:gap-0">
                         <div>
                             <h1 className="text-2xl font-bold text-foreground">Semua Arsip</h1>
                             <p className="text-sm text-muted-foreground">
                                 Kelola seluruh dokumen arsip yang tersimpan
                             </p>
                         </div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto mt-2 sm:mt-0">
                             <Button
                                 variant="outline"
                                 onClick={() => printData({
@@ -462,7 +463,7 @@ const SemuaArsip = () => {
                     </DialogHeader>
                     {viewRecord && (
                         <div className="space-y-4 text-sm">
-                            <div className="grid grid-cols-2 gap-y-4 gap-x-6">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-y-4 gap-x-6">
                                 <div className="col-span-2">
                                     <p className="text-xs text-muted-foreground mb-1">Judul</p>
                                     <p className="font-semibold text-foreground text-base">{viewRecord.title}</p>
@@ -532,7 +533,7 @@ const SemuaArsip = () => {
                         </DialogTitle>
                     </DialogHeader>
                     <div className="space-y-4">
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div className="col-span-2">
                                 <Label htmlFor="add-title">
                                     Judul Arsip <span className="text-destructive">*</span>
@@ -635,7 +636,7 @@ const SemuaArsip = () => {
                     </DialogHeader>
                     {editRecord && (
                         <div className="space-y-4">
-                            <div className="grid grid-cols-2 gap-4">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                 <div className="col-span-2">
                                     <Label>
                                         Judul Arsip <span className="text-destructive">*</span>

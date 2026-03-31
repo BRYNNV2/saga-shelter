@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import DashboardSidebar from "@/components/DashboardSidebar";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
@@ -23,6 +24,7 @@ import {
   Save,
   UserPlus,
   Printer,
+  Camera,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -51,6 +53,7 @@ const BerkasKK = () => {
   const [viewRecord, setViewRecord] = useState<any>(null);
   const [editRecord, setEditRecord] = useState<any>(null);
   const [savingEdit, setSavingEdit] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
 
   // Helper — open edit dialog with a deep copy
   const openEdit = (rec: any) => {
@@ -74,6 +77,10 @@ const BerkasKK = () => {
       return data;
     },
   });
+
+  const itemsPerPage = 10;
+  const totalPages = Math.ceil(records.length / itemsPerPage);
+  const currentRecords = records.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
   // Upload handler
   const handleUpload = useCallback(
@@ -124,7 +131,7 @@ const BerkasKK = () => {
         e.target.value = "";
       }
     },
-    [user, toast, queryClient]
+    [user, toast, queryClient, log]
   );
 
   // Scan mutation
@@ -153,6 +160,61 @@ const BerkasKK = () => {
     },
     onSettled: () => setScanningId(null),
   });
+
+  // Camera capture and auto-scan
+  const handleCameraCapture = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = e.target.files;
+      if (!files || !user) return;
+      const file = files[0];
+      if (!file) return;
+
+      setUploading(true);
+      try {
+        const ext = file.name.split(".").pop();
+        const fileName = `${user.id}/${Date.now()}_camera.${ext}`;
+
+        const { error: uploadError } = await supabase.storage
+          .from("documents")
+          .upload(fileName, file);
+
+        if (uploadError) throw uploadError;
+
+        const { data: urlData } = supabase.storage
+          .from("documents")
+          .getPublicUrl(fileName);
+
+        const { data: newRecord, error: insertError } = await supabase
+          .from("kk_records")
+          .insert({
+            user_id: user.id,
+            image_url: urlData.publicUrl,
+            status: "pending",
+          })
+          .select()
+          .single();
+
+        if (insertError) throw insertError;
+
+        toast({ title: "Berhasil foto", description: "Memulai proses OCR langsung..." });
+        queryClient.invalidateQueries({ queryKey: ["kk-records"] });
+        log({ action: "upload", entityType: "kk", description: `Mengambil foto KK untuk OCR` });
+
+        scanMutation.mutate(newRecord);
+
+      } catch (err: any) {
+        toast({
+          title: "Gagal memproses",
+          description: err.message,
+          variant: "destructive",
+        });
+      } finally {
+        setUploading(false);
+        e.target.value = "";
+      }
+    },
+    [user, toast, queryClient, log, scanMutation]
+  );
 
   // Delete mutation
   const deleteMutation = useMutation({
@@ -217,47 +279,57 @@ const BerkasKK = () => {
         const arrayBuffer = await file.arrayBuffer();
         const wb = XLSX.read(arrayBuffer, { type: "array" });
 
+        const normalizeRow = (row: any) => {
+          const normalized: any = {};
+          if (row) {
+            Object.keys(row).forEach((key) => {
+              normalized[String(key).trim().toLowerCase()] = row[key];
+            });
+          }
+          return normalized;
+        };
+
         // Try to read "Data KK" sheet first, fallback to first sheet
         const kkSheetName = wb.SheetNames.find((n) => n.toLowerCase().includes("data kk")) || wb.SheetNames[0];
         const kkSheet = wb.Sheets[kkSheetName];
-        const kkRows: any[] = XLSX.utils.sheet_to_json(kkSheet);
+        const kkRows: any[] = XLSX.utils.sheet_to_json(kkSheet).map(normalizeRow);
 
         // Try to read "Anggota Keluarga" sheet
         const anggotaSheetName = wb.SheetNames.find((n) => n.toLowerCase().includes("anggota"));
         const anggotaRows: any[] = anggotaSheetName
-          ? XLSX.utils.sheet_to_json(wb.Sheets[anggotaSheetName])
+          ? XLSX.utils.sheet_to_json(wb.Sheets[anggotaSheetName]).map(normalizeRow)
           : [];
 
         let imported = 0;
         for (const row of kkRows) {
-          const noKK = row["No KK"] || row["no_kk"] || row["NO KK"] || "";
+          const noKK = row["no kk"] || row["no_kk"] || row["nomor kk"] || "";
           const anggota = anggotaRows
-            .filter((a: any) => (a["No KK"] || a["no_kk"] || a["NO KK"] || "") === noKK)
+            .filter((a: any) => (a["no kk"] || a["no_kk"] || a["nomor kk"] || "") === noKK)
             .map((a: any) => ({
-              nama: a["Nama"] || a["nama"] || "",
-              nik: a["NIK"] || a["nik"] || "",
-              jenis_kelamin: a["Jenis Kelamin"] || a["jenis_kelamin"] || "",
-              tempat_lahir: a["Tempat Lahir"] || a["tempat_lahir"] || "",
-              tanggal_lahir: a["Tanggal Lahir"] || a["tanggal_lahir"] || "",
-              agama: a["Agama"] || a["agama"] || "",
-              pendidikan: a["Pendidikan"] || a["pendidikan"] || "",
-              pekerjaan: a["Pekerjaan"] || a["pekerjaan"] || "",
-              status_perkawinan: a["Status Perkawinan"] || a["status_perkawinan"] || "",
-              hubungan_keluarga: a["Hubungan Keluarga"] || a["hubungan_keluarga"] || "",
-              kewarganegaraan: a["Kewarganegaraan"] || a["kewarganegaraan"] || "",
+              nama: a["nama"] || a["nama lengkap"] || "",
+              nik: a["nik"] || a["nomor nik"] || "",
+              jenis_kelamin: a["jenis kelamin"] || a["jenis_kelamin"] || a["jk"] || "",
+              tempat_lahir: a["tempat lahir"] || a["tempat_lahir"] || "",
+              tanggal_lahir: a["tanggal lahir"] || a["tanggal_lahir"] || a["tgl lahir"] || "",
+              agama: a["agama"] || "",
+              pendidikan: a["pendidikan"] || a["ijazah"] || "",
+              pekerjaan: a["pekerjaan"] || a["profesi"] || "",
+              status_perkawinan: a["status perkawinan"] || a["status_perkawinan"] || a["status kawin"] || "",
+              hubungan_keluarga: a["hubungan keluarga"] || a["hubungan_keluarga"] || a["shdk"] || "",
+              kewarganegaraan: a["kewarganegaraan"] || a["wni/wna"] || "",
             }));
 
           const { error: insertError } = await supabase.from("kk_records").insert({
             user_id: user.id,
             image_url: "",
             no_kk: String(noKK),
-            kepala_keluarga: row["Kepala Keluarga"] || row["kepala_keluarga"] || "",
-            alamat: row["Alamat"] || row["alamat"] || "",
-            rt_rw: row["RT/RW"] || row["rt_rw"] || "",
-            kelurahan: row["Kelurahan"] || row["kelurahan"] || "",
-            kecamatan: row["Kecamatan"] || row["kecamatan"] || "",
-            kabupaten: row["Kabupaten"] || row["kabupaten"] || "",
-            provinsi: row["Provinsi"] || row["provinsi"] || "",
+            kepala_keluarga: row["kepala keluarga"] || row["kepala_keluarga"] || row["nama kepala keluarga"] || "",
+            alamat: row["alamat"] || row["alamat lengkap"] || "",
+            rt_rw: row["rt/rw"] || row["rt_rw"] || row["rt rw"] || row["rtrw"] || "",
+            kelurahan: row["kelurahan"] || row["desa"] || row["kel/desa"] || "",
+            kecamatan: row["kecamatan"] || "",
+            kabupaten: row["kabupaten"] || row["kota"] || row["kab/kota"] || "",
+            provinsi: row["provinsi"] || "",
             anggota: anggota.length > 0 ? anggota : [],
             status: "scanned",
           });
@@ -339,14 +411,14 @@ const BerkasKK = () => {
       <main className="flex-1 overflow-auto">
         {/* Header */}
         <header className="sticky top-0 z-10 bg-background/80 backdrop-blur-sm border-b border-border px-6 py-4">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 sm:gap-0">
             <div>
               <h1 className="text-2xl font-bold text-foreground">Berkas KK</h1>
               <p className="text-sm text-muted-foreground">
                 Scan dan kelola data Kartu Keluarga
               </p>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-2 sm:gap-3 w-full sm:w-auto mt-2 sm:mt-0">
               <Button
                 variant="outline"
                 onClick={() => {
@@ -419,6 +491,26 @@ const BerkasKK = () => {
                   disabled={uploading}
                 />
               </label>
+              <label>
+                <Button asChild disabled={uploading}>
+                  <span>
+                    {uploading ? (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    ) : (
+                      <Camera className="h-4 w-4 mr-2" />
+                    )}
+                    Foto KK (OCR)
+                  </span>
+                </Button>
+                <input
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  className="hidden"
+                  onChange={handleCameraCapture}
+                  disabled={uploading}
+                />
+              </label>
             </div>
           </div>
         </header>
@@ -484,11 +576,12 @@ const BerkasKK = () => {
                 </p>
               </div>
             ) : (
-              <div className="divide-y divide-border">
-                {records.map((record: any) => (
+              <div>
+                <div className="divide-y divide-border">
+                  {currentRecords.map((record: any) => (
                   <div
                     key={record.id}
-                    className="flex items-center justify-between p-5 hover:bg-muted/50 transition-colors"
+                    className="flex flex-col sm:flex-row sm:items-center justify-between p-5 hover:bg-muted/50 transition-colors gap-4 sm:gap-0"
                   >
                     <div className="flex items-center gap-4">
                       <div className="h-14 w-14 rounded-lg overflow-hidden bg-muted flex-shrink-0">
@@ -517,7 +610,7 @@ const BerkasKK = () => {
                         )}
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto justify-start sm:justify-end mt-2 sm:mt-0">
                       <Badge
                         variant={record.status === "scanned" ? "default" : "outline"}
                       >
@@ -572,6 +665,32 @@ const BerkasKK = () => {
                     </div>
                   </div>
                 ))}
+                </div>
+                {totalPages > 1 && (
+                  <div className="flex flex-col sm:flex-row items-center justify-between p-4 border-t border-border gap-4">
+                    <p className="text-sm text-muted-foreground">
+                      Menampilkan {(currentPage - 1) * itemsPerPage + 1} - {Math.min(currentPage * itemsPerPage, records.length)} dari {records.length} berkas
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                        disabled={currentPage === 1}
+                      >
+                        Sebelumnya
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                        disabled={currentPage === totalPages}
+                      >
+                        Selanjutnya
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -597,7 +716,7 @@ const BerkasKK = () => {
               )}
 
               {/* Field info */}
-              <div className="grid grid-cols-2 gap-4 text-sm">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
                 {[
                   { label: "No. KK", val: viewRecord.no_kk },
                   { label: "Kepala Keluarga", val: viewRecord.kepala_keluarga },
