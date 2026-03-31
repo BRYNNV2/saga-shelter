@@ -1,0 +1,105 @@
+﻿
+> vite_react_shadcn_ts@0.0.0 build
+> vite build
+
+[36mvite v5.4.19 [32mbuilding for production...[36m[39m
+transforming...
+node.exe : Browserslist: b
+rowsers data (caniuse-lite
+) is 10 months old. Please
+ run:
+At line:1 char:1
++ & "C:\Program Files\node
+js/node.exe" "C:\Program F
+iles\nodejs/node_mo ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo        
+      : NotSpecified: (B  
+  rowserslist: b...ld.    
+ Please run::String) [    
+], RemoteException
+    + FullyQualifiedError 
+   Id : NativeCommandErr  
+  or
+ 
+  npx update-browserslist-
+db@latest
+  Why you should do it reg
+ularly: https://github.com
+/browserslist/update-db#re
+adme
+[33m[vite:css] @import mu
+st precede all other state
+ments (besides @charset or
+ empty @layer)
+3  |  @tailwind utilities;
+4  |  
+5  |  @import url("https:/
+/fonts.googleapis.com/css2
+?family=Plus+Jakarta+Sans:
+wght@400;500;600;700;800&d
+isplay=swap");
+   |  ^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^
+6  |  
+7  |  @layer base {[39m
+[1m[33m[plugin:vite:esbu
+ild][39m[22m [33m[plugi
+n vite:esbuild] src/pages/
+Pengaturan.tsx: [33mThe "
+??" operator here will alw
+ays return the left operan
+d[33m
+431|                      
+                    {[
+432|                      
+                        { 
+label: "Login Terakhir", v
+alue: lastSignIn },
+433|                      
+                        { 
+label: "ID Pengguna", valu
+e: user?.id?.slice(0, 16) 
++ "..." ?? "ΓÇö" },
+   |                      
+                          
+                          
+                          
+        ^
+434|                      
+                        { 
+label: "Provider Auth", va
+lue: user?.app_metadata?.p
+rovider ?? "email" },
+435|                      
+                    ].map(
+(info) => (
+[39m
+[32mΓ£ô[39m 3407 modules transformed.
+rendering chunks...
+computing gzip size...
+[2mdist/[22m[32mindex.html                 [39m[1m[2m    1.15 kB[22m[1m[22m[2m Γöé gzip:   0.49 kB[22m
+[2mdist/[22m[35massets/index-DKAE_iQv.css  [39m[1m[2m   77.55 kB[22m[1m[22m[2m Γöé gzip:  13.03 kB[22m
+[2mdist/[22m[36massets/index-BxTlT135.js   [39m[1m[33m1,619.24 kB[39m[22m[2m Γöé gzip: 474.91 kB[22m
+[33m
+(!) Some chunks are larger
+ than 500 kB after minific
+ation. Consider:
+- Using dynamic import() t
+o code-split the applicati
+on
+- Use build.rollupOptions.
+output.manualChunks to imp
+rove chunking: https://rol
+lupjs.org/configuration-op
+tions/#output-manualchunks
+- Adjust chunk size limit 
+for this warning via build
+.chunkSizeWarningLimit.[3
+9m
+[32mΓ£ô built in 15.55s[39m

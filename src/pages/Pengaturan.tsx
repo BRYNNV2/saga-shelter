@@ -217,7 +217,7 @@ const Pengaturan = () => {
                                 {/* Logout shortcut */}
                                 <button
                                     onClick={() => setShowLogoutDialog(true)}
-                                    className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm font-medium transition-all w-full text-left text-destructive hover:bg-destructive/10 hidden md:flex"
+                                    className="items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm font-medium transition-all w-full text-left text-destructive hover:bg-destructive/10 hidden md:flex"
                                 >
                                     <LogOut className="h-4 w-4 shrink-0" />
                                     <span>Keluar</span>
@@ -430,7 +430,7 @@ const Pengaturan = () => {
                                     <div className="space-y-3">
                                         {[
                                             { label: "Login Terakhir", value: lastSignIn },
-                                            { label: "ID Pengguna", value: user?.id?.slice(0, 16) + "..." ?? "—" },
+                                            { label: "ID Pengguna", value: user?.id ? `${user.id.slice(0, 16)}...` : "—" },
                                             { label: "Provider Auth", value: user?.app_metadata?.provider ?? "email" },
                                         ].map((info) => (
                                             <div key={info.label} className="flex items-center justify-between py-2.5 border-b border-border last:border-0">
