@@ -404,6 +404,57 @@ const BerkasKK = () => {
     toast({ title: "Berhasil", description: "File Excel berhasil diunduh" });
   };
 
+  // Download template Excel
+  const downloadTemplate = () => {
+    const templateKK = [
+      {
+        "No KK": "3273010101010001",
+        "Kepala Keluarga": "BUDI SANTOSO",
+        "Alamat": "JL. MERDEKA NO. 10",
+        "RT/RW": "001/002",
+        "Kelurahan": "SUKAMAJU",
+        "Kecamatan": "CIBEUNYING",
+        "Kabupaten": "KOTA BANDUNG",
+        "Provinsi": "JAWA BARAT",
+      },
+    ];
+    const templateAnggota = [
+      {
+        "No KK": "3273010101010001",
+        "Nama": "BUDI SANTOSO",
+        "NIK": "3273010101800001",
+        "Jenis Kelamin": "Laki-laki",
+        "Tempat Lahir": "BANDUNG",
+        "Tanggal Lahir": "01-01-1980",
+        "Agama": "ISLAM",
+        "Pendidikan": "S1",
+        "Pekerjaan": "PEGAWAI SWASTA",
+        "Status Perkawinan": "KAWIN",
+        "Hubungan Keluarga": "KEPALA KELUARGA",
+        "Kewarganegaraan": "WNI",
+      },
+      {
+        "No KK": "3273010101010001",
+        "Nama": "SITI RAHAYU",
+        "NIK": "3273015505820002",
+        "Jenis Kelamin": "Perempuan",
+        "Tempat Lahir": "BANDUNG",
+        "Tanggal Lahir": "15-05-1982",
+        "Agama": "ISLAM",
+        "Pendidikan": "S1",
+        "Pekerjaan": "IBU RUMAH TANGGA",
+        "Status Perkawinan": "KAWIN",
+        "Hubungan Keluarga": "ISTRI",
+        "Kewarganegaraan": "WNI",
+      },
+    ];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(templateKK), "Data KK");
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(templateAnggota), "Anggota Keluarga");
+    XLSX.writeFile(wb, "Template_Import_KK.xlsx");
+    toast({ title: "Template berhasil diunduh", description: "Isi template sesuai format, lalu import kembali" });
+  };
+
   return (
     <div className="flex min-h-screen bg-background">
       <DashboardSidebar />
@@ -471,6 +522,10 @@ const BerkasKK = () => {
                   disabled={importingExcel}
                 />
               </label>
+              <Button variant="outline" onClick={downloadTemplate} title="Download template format Excel yang benar">
+                <Download className="h-4 w-4 mr-2" />
+                Template
+              </Button>
               <label>
                 <Button asChild disabled={uploading}>
                   <span>
