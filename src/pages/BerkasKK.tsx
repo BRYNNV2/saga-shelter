@@ -593,7 +593,13 @@ const BerkasKK = () => {
                       </div>
                       <div>
                         <p className="font-medium text-foreground">
-                          {record.kepala_keluarga || (record.status === "scanned" ? "Data tidak lengkap" : "Belum discan")}
+                          {record.kepala_keluarga
+                            ? record.kepala_keluarga
+                            : record.no_kk
+                              ? `KK: ${record.no_kk}`
+                              : record.status === "scanned"
+                                ? "Data tidak lengkap"
+                                : "Belum discan"}
                         </p>
                         <p className="text-sm text-muted-foreground">
                           {record.no_kk
@@ -709,9 +715,18 @@ const BerkasKK = () => {
           {viewRecord && (
             <div className="space-y-5">
               {/* Gambar KK */}
-              {viewRecord.image_url && (
+              {viewRecord.image_url ? (
                 <div className="rounded-xl overflow-hidden border border-border">
-                  <img src={viewRecord.image_url} alt="Foto KK" className="w-full object-contain max-h-64" />
+                  <img
+                    src={viewRecord.image_url}
+                    alt="Foto KK"
+                    className="w-full object-contain max-h-64"
+                    onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                  />
+                </div>
+              ) : (
+                <div className="rounded-xl border border-border bg-muted/30 p-6 text-center text-sm text-muted-foreground">
+                  Tidak ada foto dokumen (data diimport dari Excel)
                 </div>
               )}
 
