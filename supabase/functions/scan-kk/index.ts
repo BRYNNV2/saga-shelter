@@ -1,6 +1,7 @@
 /* eslint-disable */
 // @ts-nocheck
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { encode as encodeBase64 } from "https://deno.land/std@0.168.0/encoding/base64.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
@@ -66,60 +67,63 @@ serve(async (req) => {
     const OCR_API_KEY = Deno.env.get("OCRSPACE_API_KEY") || "helloworld";
     const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 
-    // Download gambar dan convert ke base64
-    console.log("Downloading image:", imageUrl);
+    // Download gambar
+    console.log("Step 1: Downloading image:", imageUrl);
     const imgResp = await fetch(imageUrl);
-    if (!imgResp.ok) throw new Error(`Gagal download gambar: ${imgResp.status}`);
+    if (!imgResp.ok) throw new Error(`Gagal download gambar: HTTP ${imgResp.status} ${imgResp.statusText}`);
+
     const imgBuffer = await imgResp.arrayBuffer();
     const imgBytes = new Uint8Array(imgBuffer);
+    console.log("Step 2: Image size:", imgBytes.length, "bytes");
 
-    // Convert ke base64
-    let binary = "";
-    const chunkSize = 8192;
-    for (let i = 0; i < imgBytes.length; i += chunkSize) {
-      binary += String.fromCharCode(...imgBytes.slice(i, i + chunkSize));
+    if (imgBytes.length > 1024 * 1024) {
+      console.warn("Image > 1MB, OCR.space free key may reject it");
     }
-    const base64 = btoa(binary);
-    const base64Image = `data:image/jpeg;base64,${base64}`;
 
-    // Kirim ke OCR.space via base64
-    const params = new URLSearchParams();
-    params.append("apikey", OCR_API_KEY);
-    params.append("base64Image", base64Image);
-    params.append("language", "eng");
-    params.append("isOverlayRequired", "false");
-    params.append("detectOrientation", "true");
-    params.append("scale", "true");
-    params.append("OCREngine", "2");
+    // Encode base64 menggunakan Deno std library (lebih reliable)
+    const base64str = encodeBase64(imgBytes);
+    const base64Image = `data:image/jpeg;base64,${base64str}`;
+    console.log("Step 3: Base64 length:", base64str.length);
 
-    console.log("Calling OCR.space API...");
+    // Kirim ke OCR.space
+    const params = new URLSearchParams({
+      apikey: OCR_API_KEY,
+      base64Image: base64Image,
+      language: "eng",
+      isOverlayRequired: "false",
+      detectOrientation: "true",
+      scale: "true",
+      OCREngine: "2",
+    });
+
+    console.log("Step 4: Calling OCR.space...");
     const ocrResp = await fetch("https://api.ocr.space/parse/image", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: params.toString(),
     });
 
+    console.log("Step 5: OCR.space status:", ocrResp.status);
     const ocrText = await ocrResp.text();
-    console.log("OCR.space raw response:", ocrText.substring(0, 500));
+    console.log("Step 6: OCR.space response:", ocrText.substring(0, 600));
 
     let ocrData: any;
     try {
       ocrData = JSON.parse(ocrText);
     } catch {
-      throw new Error("OCR.space mengembalikan respons tidak valid: " + ocrText.substring(0, 200));
+      throw new Error("OCR.space respons bukan JSON: " + ocrText.substring(0, 200));
     }
 
     if (ocrData.IsErroredOnProcessing) {
-      throw new Error(`OCR error: ${JSON.stringify(ocrData.ErrorMessage)}`);
+      throw new Error(`OCR.space error: ${JSON.stringify(ocrData.ErrorMessage)}`);
     }
 
     const rawText = ocrData.ParsedResults?.[0]?.ParsedText || "";
-    if (!rawText.trim()) throw new Error("OCR tidak bisa membaca teks dari gambar");
-
-    console.log("OCR text:", rawText.substring(0, 300));
+    console.log("Step 7: Parsed OCR text length:", rawText.length);
+    if (!rawText.trim()) throw new Error("OCR tidak menghasilkan teks (gambar mungkin buram/kosong)");
 
     const extractedData = parseKKText(rawText);
-    console.log("Parsed KK:", JSON.stringify(extractedData));
+    console.log("Step 8: Extracted KK:", JSON.stringify(extractedData));
 
     const { error: updateError } = await supabase
       .from("kk_records")
@@ -137,15 +141,16 @@ serve(async (req) => {
       })
       .eq("id", recordId);
 
-    if (updateError) throw new Error("Gagal simpan ke DB: " + updateError.message);
+    if (updateError) throw new Error("DB update error: " + updateError.message);
 
     return new Response(JSON.stringify({ success: true, data: extractedData }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {
-    console.error("scan-kk error:", e?.message || e);
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error("scan-kk FATAL:", msg);
     return new Response(
-      JSON.stringify({ error: e instanceof Error ? e.message : String(e) }),
+      JSON.stringify({ error: msg }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }
