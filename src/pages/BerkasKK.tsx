@@ -141,7 +141,15 @@ const BerkasKK = () => {
       const { data, error } = await supabase.functions.invoke("scan-kk", {
         body: { imageUrl: record.image_url, recordId: record.id },
       });
-      if (error) throw error;
+      if (error) {
+        try {
+          const errBody = await (error as any).context?.json?.();
+          if (errBody?.error) throw new Error(errBody.error);
+        } catch (e) {
+          if ((e as Error).message !== error.message) throw e;
+        }
+        throw error;
+      }
       if (data?.error) throw new Error(data.error);
       return data;
     },
