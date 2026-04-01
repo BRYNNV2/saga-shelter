@@ -93,9 +93,11 @@ Jika ada data yang tidak terbaca, isi dengan string kosong "".`
     if (!aiResponse.ok) {
       const errText = await aiResponse.text();
       console.error("Gemini error:", aiResponse.status, errText);
-      // Return 200 dengan error field agar pesan tidak hilang
+      const userMsg = aiResponse.status === 429
+        ? "Scan AI sedang sibuk (rate limit). Tunggu 1-2 menit lalu coba lagi."
+        : `Gemini API error ${aiResponse.status}: ${errText.substring(0, 200)}`;
       return new Response(
-        JSON.stringify({ error: `Gemini API error ${aiResponse.status}: ${errText.substring(0, 300)}` }),
+        JSON.stringify({ error: userMsg }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
