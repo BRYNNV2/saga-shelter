@@ -294,7 +294,7 @@ const BerkasKTP = () => {
 
         let imported = 0;
         for (const row of ktpRows) {
-          const nik = row["nik"] || row["no ktp"] || row["nomor ktp"] || "";
+          const nik = row["nik"] || row["no ktp"] || row["nomor ktp"] || row["nomor nik"] || "";
           
           const { error: insertError } = await supabase.from("ktp_records").insert({
             user_id: user.id,
@@ -368,6 +368,32 @@ const BerkasKTP = () => {
     toast({ title: "Berhasil", description: "File Excel berhasil diunduh" });
   };
 
+  // Download template Excel
+  const downloadTemplate = () => {
+    const templateData = [
+      {
+        "NIK": "3273010101800001",
+        "Nama Lengkap": "BUDI SANTOSO",
+        "Tempat Lahir": "BANDUNG",
+        "Tanggal Lahir": "01-01-1980",
+        "Jenis Kelamin": "Laki-laki",
+        "Golongan Darah": "O",
+        "Alamat": "JL. MERDEKA NO. 10",
+        "RT/RW": "001/002",
+        "Kelurahan": "SUKAMAJU",
+        "Kecamatan": "CIBEUNYING",
+        "Agama": "ISLAM",
+        "Status Perkawinan": "KAWIN",
+        "Pekerjaan": "PEGAWAI SWASTA",
+        "Kewarganegaraan": "WNI",
+      },
+    ];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(templateData), "Data KTP");
+    XLSX.writeFile(wb, "Template_Import_KTP.xlsx");
+    toast({ title: "Template berhasil diunduh", description: "Isi template sesuai format, lalu import kembali" });
+  };
+
   return (
     <div className="flex min-h-screen bg-background">
       <DashboardSidebar />
@@ -432,6 +458,10 @@ const BerkasKTP = () => {
                   disabled={importingExcel}
                 />
               </label>
+              <Button variant="outline" onClick={downloadTemplate} title="Download template format Excel yang benar">
+                <Download className="h-4 w-4 mr-2" />
+                Template
+              </Button>
               <label>
                 <Button asChild disabled={uploading}>
                   <span>
