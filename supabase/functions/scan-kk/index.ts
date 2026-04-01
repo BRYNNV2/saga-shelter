@@ -9,6 +9,100 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+/** Ambil nilai dari teks OCR berdasarkan label */
+function extractField(text: string, ...labels: string[]): string {
+  for (const label of labels) {
+    const regex = new RegExp(label + "[\\s:]+([^\\n]+)", "i");
+    const match = text.match(regex);
+    if (match) return match[1].trim();
+  }
+  return "";
+}
+
+/** Ekstrak nomor 16 digit (No KK atau NIK) */
+function extract16Digit(text: string, offset = 0): string {
+  const matches = [...text.matchAll(/\b(\d{16})\b/g)];
+  return matches[offset] ? matches[offset][1] : "";
+}
+
+/** Parse anggota keluarga dari teks KK */
+function parseAnggotaKK(text: string): any[] {
+  // Coba detect baris-baris yang mengandung NIK (16 digit) sebagai anggota
+  const anggota: any[] = [];
+  const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
+
+  for (let i = 0; i < lines.length; i++) {
+    const nikMatch = lines[i].match(/\b(\d{16})\b/);
+    if (nikMatch) {
+      const nik = nikMatch[1];
+      // Nama biasanya muncul sebelum/sesudah NIK di baris yang sama atau baris sebelumnya
+      const namaLine = lines[i].replace(nik, "").trim() || (i > 0 ? lines[i - 1] : "");
+      const nama = namaLine.replace(/^\d+\.?\s*/, "").trim(); // hapus nomor urut
+      if (nama && nama.length > 2) {
+        anggota.push({
+          nama,
+          nik,
+          jenis_kelamin: "",
+          tempat_lahir: "",
+          tanggal_lahir: "",
+          agama: "",
+          pendidikan: "",
+          pekerjaan: "",
+          status_perkawinan: "",
+          hubungan_keluarga: "",
+          kewarganegaraan: "WNI",
+        });
+      }
+    }
+  }
+  return anggota;
+}
+
+/** Parse teks OCR KK menjadi objek terstruktur */
+function parseKKText(text: string): any {
+  const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
+  const fullText = lines.join("\n");
+
+  // No KK — 16 digit pertama yang ditemukan
+  const no_kk = extract16Digit(fullText, 0);
+
+  // Kepala Keluarga
+  const kepala_keluarga = extractField(fullText, "Kepala Keluarga", "Nama Kepala", "KEPALA KELUARGA");
+
+  // Alamat
+  const alamat = extractField(fullText, "Alamat", "ALAMAT");
+
+  // RT/RW
+  const rt_rw = extractField(fullText, "RT\\/RW", "RT/RW", "RTRW");
+
+  // Kelurahan
+  const kelurahan = extractField(fullText, "Kel\\/Desa", "Kelurahan", "Desa");
+
+  // Kecamatan
+  const kecamatan = extractField(fullText, "Kecamatan");
+
+  // Kabupaten/Kota
+  const kabupaten = extractField(fullText, "Kabupaten", "Kota", "Kab\\/Kota");
+
+  // Provinsi
+  const provinsi = extractField(fullText, "Provinsi");
+
+  // Anggota keluarga dari teks
+  const anggota = parseAnggotaKK(fullText);
+
+  return {
+    no_kk,
+    kepala_keluarga,
+    alamat,
+    rt_rw,
+    kelurahan,
+    kecamatan,
+    kabupaten,
+    provinsi,
+    anggota,
+  };
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -16,184 +110,52 @@ serve(async (req) => {
 
   try {
     const { imageUrl, recordId } = await req.json();
-    const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
-    if (!GEMINI_API_KEY) throw new Error("GEMINI_API_KEY is not configured");
+
+    // Gunakan OCRSPACE_API_KEY jika ada, fallback ke demo key "helloworld"
+    const OCR_API_KEY = Deno.env.get("OCRSPACE_API_KEY") || "helloworld";
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Call Google Gemini API with image for OCR
-    const aiResponse = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          contents: [
-            {
-              parts: [
-                {
-                  text: `Kamu adalah OCR expert untuk dokumen Kartu Keluarga (KK) Indonesia.
-Ekstrak semua data dari gambar Kartu Keluarga ini dan kembalikan HANYA dalam format JSON berikut (tanpa markdown, tanpa kode block):
-{
-  "no_kk": "16 digit nomor KK",
-  "kepala_keluarga": "nama kepala keluarga",
-  "alamat": "alamat lengkap",
-  "rt_rw": "RT/RW",
-  "kelurahan": "kelurahan/desa",
-  "kecamatan": "kecamatan",
-  "kabupaten": "kabupaten/kota",
-  "provinsi": "provinsi",
-  "anggota": [
-    {
-      "nama": "nama anggota",
-      "nik": "16 digit NIK",
-      "jenis_kelamin": "Laki-laki/Perempuan",
-      "tempat_lahir": "tempat lahir",
-      "tanggal_lahir": "tanggal lahir",
-      "agama": "agama",
-      "pendidikan": "pendidikan",
-      "pekerjaan": "pekerjaan",
-      "status_perkawinan": "status perkawinan",
-      "hubungan_keluarga": "hubungan keluarga",
-      "kewarganegaraan": "WNI/WNA"
-    }
-  ]
-}
-Jika ada data yang tidak terbaca, isi dengan string kosong "". Pastikan field anggota selalu berupa array.`,
-                },
-                {
-                  inline_data: null,
-                },
-              ],
-            },
-          ],
-          generationConfig: {
-            temperature: 0.1,
-            maxOutputTokens: 4096,
-          },
-        }),
-      }
-    );
+    // Kirim URL gambar ke OCR.space
+    const formData = new FormData();
+    formData.append("apikey", OCR_API_KEY);
+    formData.append("url", imageUrl);
+    formData.append("language", "eng");
+    formData.append("isOverlayRequired", "false");
+    formData.append("detectOrientation", "true");
+    formData.append("scale", "true");
+    formData.append("OCREngine", "2"); // Engine 2 lebih akurat
 
-    // Kalau imageUrl adalah URL publik, gunakan file_data; jika tidak, download dulu
-    let imageData: string;
-    let imageMimeType: string = "image/jpeg";
+    const ocrResponse = await fetch("https://api.ocr.space/parse/image", {
+      method: "POST",
+      body: formData,
+    });
 
-    // Download gambar dan convert ke base64
-    const imgResponse = await fetch(imageUrl);
-    if (!imgResponse.ok) throw new Error("Gagal mengunduh gambar");
-    const imgBuffer = await imgResponse.arrayBuffer();
-    const imgBytes = new Uint8Array(imgBuffer);
-    imageData = btoa(String.fromCharCode(...imgBytes));
-
-    // Detect mime type dari URL
-    if (imageUrl.toLowerCase().includes(".png")) imageMimeType = "image/png";
-    else if (imageUrl.toLowerCase().includes(".webp")) imageMimeType = "image/webp";
-    else if (imageUrl.toLowerCase().includes(".jpg") || imageUrl.toLowerCase().includes(".jpeg")) imageMimeType = "image/jpeg";
-
-    // Re-build request dengan data gambar
-    const finalAiResponse = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          contents: [
-            {
-              parts: [
-                {
-                  text: `Kamu adalah OCR expert untuk dokumen Kartu Keluarga (KK) Indonesia.
-Ekstrak semua data dari gambar Kartu Keluarga ini dan kembalikan HANYA dalam format JSON berikut (tanpa markdown, tanpa kode block, tanpa penjelasan tambahan):
-{
-  "no_kk": "16 digit nomor KK",
-  "kepala_keluarga": "nama kepala keluarga",
-  "alamat": "alamat lengkap",
-  "rt_rw": "RT/RW",
-  "kelurahan": "kelurahan/desa",
-  "kecamatan": "kecamatan",
-  "kabupaten": "kabupaten/kota",
-  "provinsi": "provinsi",
-  "anggota": [
-    {
-      "nama": "nama anggota",
-      "nik": "16 digit NIK",
-      "jenis_kelamin": "Laki-laki/Perempuan",
-      "tempat_lahir": "tempat lahir",
-      "tanggal_lahir": "tanggal lahir",
-      "agama": "agama",
-      "pendidikan": "pendidikan",
-      "pekerjaan": "pekerjaan",
-      "status_perkawinan": "status perkawinan",
-      "hubungan_keluarga": "hubungan keluarga",
-      "kewarganegaraan": "WNI/WNA"
-    }
-  ]
-}`,
-                },
-                {
-                  inline_data: {
-                    mime_type: imageMimeType,
-                    data: imageData,
-                  },
-                },
-              ],
-            },
-          ],
-          generationConfig: {
-            temperature: 0.1,
-            maxOutputTokens: 4096,
-          },
-        }),
-      }
-    );
-
-    if (!finalAiResponse.ok) {
-      const errText = await finalAiResponse.text();
-      console.error("Gemini AI error:", finalAiResponse.status, errText);
-
-      if (finalAiResponse.status === 429) {
-        return new Response(
-          JSON.stringify({ error: "Terlalu banyak permintaan, coba lagi nanti." }),
-          { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-
-      throw new Error(`Gemini API error: ${finalAiResponse.status} - ${errText}`);
+    if (!ocrResponse.ok) {
+      const errText = await ocrResponse.text();
+      throw new Error(`OCR.space error: ${ocrResponse.status} - ${errText}`);
     }
 
-    const aiData = await finalAiResponse.json();
-    const rawText = aiData.candidates?.[0]?.content?.parts?.[0]?.text;
+    const ocrData = await ocrResponse.json();
 
-    if (!rawText) {
-      throw new Error("AI tidak mengembalikan data");
+    if (ocrData.IsErroredOnProcessing) {
+      throw new Error(`OCR gagal: ${ocrData.ErrorMessage}`);
     }
 
-    // Parse JSON dari respons AI (hapus markdown jika ada)
-    let extractedData: any;
-    try {
-      // Bersihkan jika ada markdown code block
-      const cleaned = rawText
-        .replace(/```json\n?/gi, "")
-        .replace(/```\n?/g, "")
-        .trim();
-      extractedData = JSON.parse(cleaned);
-    } catch (e) {
-      console.error("Failed to parse AI response:", rawText);
-      throw new Error("Gagal memproses respons AI: format tidak valid");
+    const rawText = ocrData.ParsedResults?.[0]?.ParsedText || "";
+    console.log("OCR raw text:", rawText);
+
+    if (!rawText.trim()) {
+      throw new Error("OCR tidak bisa membaca teks dari gambar");
     }
 
-    // Pastikan anggota adalah array
-    if (!Array.isArray(extractedData.anggota)) {
-      extractedData.anggota = [];
-    }
+    // Parse teks OCR menjadi field-field KK
+    const extractedData = parseKKText(rawText);
+    console.log("Extracted KK data:", extractedData);
 
-    // Update the record in the database
+    // Update record di database
     const { error: updateError } = await supabase
       .from("kk_records")
       .update({
@@ -215,7 +177,7 @@ Ekstrak semua data dari gambar Kartu Keluarga ini dan kembalikan HANYA dalam for
       throw new Error("Failed to update record");
     }
 
-    return new Response(JSON.stringify({ success: true, data: extractedData }), {
+    return new Response(JSON.stringify({ success: true, data: extractedData, rawText }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {

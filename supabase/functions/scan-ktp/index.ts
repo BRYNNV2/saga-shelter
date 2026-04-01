@@ -9,6 +9,107 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+/** Ambil nilai dari teks OCR berdasarkan label */
+function extractField(text: string, ...labels: string[]): string {
+  for (const label of labels) {
+    const regex = new RegExp(label + "[\\s:]+([^\\n]+)", "i");
+    const match = text.match(regex);
+    if (match) return match[1].trim();
+  }
+  return "";
+}
+
+/** Ekstrak NIK (16 digit angka) */
+function extractNIK(text: string): string {
+  const match = text.match(/\b(\d{16})\b/);
+  return match ? match[1] : "";
+}
+
+/** Parse teks OCR KTP menjadi objek terstruktur */
+function parseKTPText(text: string): any {
+  const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
+  const fullText = lines.join("\n");
+
+  // NIK
+  const nik = extractNIK(fullText);
+
+  // Nama — biasanya di baris setelah "Nama"
+  const nama = extractField(fullText, "Nama", "NAMA");
+
+  // Tempat & tanggal lahir — format: Tempat Tgl Lahir : KOTA, DD-MM-YYYY
+  let tempat_lahir = "";
+  let tanggal_lahir = "";
+  const ttlMatch = fullText.match(/Tempat\s*[\/]?\s*Tgl\s*Lahir\s*[:\s]+([^,\n]+)[,\s]+(\d{2}-\d{2}-\d{4})/i);
+  if (ttlMatch) {
+    tempat_lahir = ttlMatch[1].trim();
+    tanggal_lahir = ttlMatch[2].trim();
+  } else {
+    tempat_lahir = extractField(fullText, "Tempat Lahir", "Tempat/Tgl Lahir");
+    // Cari tanggal format DD-MM-YYYY
+    const tglMatch = fullText.match(/(\d{2}-\d{2}-\d{4})/);
+    if (tglMatch) tanggal_lahir = tglMatch[1];
+  }
+
+  // Jenis Kelamin
+  let jenis_kelamin = extractField(fullText, "Jenis Kelamin", "Jenis\\/Kelamin");
+  if (!jenis_kelamin) {
+    if (/LAKI-LAKI/i.test(fullText)) jenis_kelamin = "LAKI-LAKI";
+    else if (/PEREMPUAN/i.test(fullText)) jenis_kelamin = "PEREMPUAN";
+  }
+
+  // Golongan darah
+  let golongan_darah = extractField(fullText, "Gol\\. Darah", "Golongan Darah");
+  if (!golongan_darah) {
+    const gdMatch = fullText.match(/\b(A|B|AB|O)\b/);
+    if (gdMatch) golongan_darah = gdMatch[1];
+  }
+
+  // Alamat
+  const alamat = extractField(fullText, "Alamat", "ALAMAT");
+
+  // RT/RW
+  const rt_rw = extractField(fullText, "RT\\/RW", "RTRW", "RT/RW");
+
+  // Kelurahan/Desa
+  const kelurahan = extractField(fullText, "Kel\\/Desa", "Kelurahan", "KELURAHAN");
+
+  // Kecamatan
+  const kecamatan = extractField(fullText, "Kecamatan", "KECAMATAN");
+
+  // Agama
+  const agama = extractField(fullText, "Agama", "AGAMA");
+
+  // Status Perkawinan
+  const status_perkawinan = extractField(fullText, "Status Perkawinan", "Status Perkawin", "PERKAWINAN");
+
+  // Pekerjaan
+  const pekerjaan = extractField(fullText, "Pekerjaan", "PEKERJAAN");
+
+  // Kewarganegaraan
+  let kewarganegaraan = extractField(fullText, "Kewarganegaraan");
+  if (!kewarganegaraan) {
+    if (/WNI/i.test(fullText)) kewarganegaraan = "WNI";
+    else if (/WNA/i.test(fullText)) kewarganegaraan = "WNA";
+  }
+
+  return {
+    nik,
+    nama,
+    tempat_lahir,
+    tanggal_lahir,
+    jenis_kelamin,
+    golongan_darah,
+    alamat,
+    rt_rw,
+    kelurahan,
+    kecamatan,
+    agama,
+    status_perkawinan,
+    pekerjaan,
+    kewarganegaraan,
+  };
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -16,110 +117,52 @@ serve(async (req) => {
 
   try {
     const { imageUrl, recordId } = await req.json();
-    const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
-    if (!GEMINI_API_KEY) throw new Error("GEMINI_API_KEY is not configured");
+
+    // Gunakan OCRSPACE_API_KEY jika ada, fallback ke demo key "helloworld"
+    const OCR_API_KEY = Deno.env.get("OCRSPACE_API_KEY") || "helloworld";
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Download gambar dan convert ke base64
-    const imgResponse = await fetch(imageUrl);
-    if (!imgResponse.ok) throw new Error("Gagal mengunduh gambar");
-    const imgBuffer = await imgResponse.arrayBuffer();
-    const imgBytes = new Uint8Array(imgBuffer);
-    const imageData = btoa(String.fromCharCode(...imgBytes));
+    // Kirim URL gambar ke OCR.space
+    const formData = new FormData();
+    formData.append("apikey", OCR_API_KEY);
+    formData.append("url", imageUrl);
+    formData.append("language", "eng");
+    formData.append("isOverlayRequired", "false");
+    formData.append("detectOrientation", "true");
+    formData.append("scale", "true");
+    formData.append("OCREngine", "2"); // Engine 2 lebih akurat
 
-    // Detect mime type dari URL
-    let imageMimeType = "image/jpeg";
-    if (imageUrl.toLowerCase().includes(".png")) imageMimeType = "image/png";
-    else if (imageUrl.toLowerCase().includes(".webp")) imageMimeType = "image/webp";
+    const ocrResponse = await fetch("https://api.ocr.space/parse/image", {
+      method: "POST",
+      body: formData,
+    });
 
-    // Call Google Gemini API
-    const aiResponse = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          contents: [
-            {
-              parts: [
-                {
-                  text: `Kamu adalah OCR expert untuk dokumen Kartu Tanda Penduduk (KTP) Indonesia.
-Ekstrak semua data dari gambar KTP ini dan kembalikan HANYA dalam format JSON berikut (tanpa markdown, tanpa kode block, tanpa penjelasan tambahan):
-{
-  "nik": "16 digit NIK",
-  "nama": "nama lengkap",
-  "tempat_lahir": "tempat lahir",
-  "tanggal_lahir": "tanggal lahir format DD-MM-YYYY",
-  "jenis_kelamin": "LAKI-LAKI atau PEREMPUAN",
-  "golongan_darah": "A/B/AB/O/-",
-  "alamat": "alamat tempat tinggal",
-  "rt_rw": "RT/RW seperti 001/002",
-  "kelurahan": "kelurahan/desa",
-  "kecamatan": "kecamatan",
-  "agama": "agama",
-  "status_perkawinan": "status perkawinan",
-  "pekerjaan": "pekerjaan",
-  "kewarganegaraan": "WNI atau WNA"
-}
-Jika ada data yang tidak terbaca, isi dengan string kosong "".`,
-                },
-                {
-                  inline_data: {
-                    mime_type: imageMimeType,
-                    data: imageData,
-                  },
-                },
-              ],
-            },
-          ],
-          generationConfig: {
-            temperature: 0.1,
-            maxOutputTokens: 2048,
-          },
-        }),
-      }
-    );
-
-    if (!aiResponse.ok) {
-      const errText = await aiResponse.text();
-      console.error("Gemini AI error:", aiResponse.status, errText);
-
-      if (aiResponse.status === 429) {
-        return new Response(
-          JSON.stringify({ error: "Terlalu banyak permintaan, coba lagi nanti." }),
-          { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-
-      throw new Error(`Gemini API error: ${aiResponse.status} - ${errText}`);
+    if (!ocrResponse.ok) {
+      const errText = await ocrResponse.text();
+      throw new Error(`OCR.space error: ${ocrResponse.status} - ${errText}`);
     }
 
-    const aiData = await aiResponse.json();
-    const rawText = aiData.candidates?.[0]?.content?.parts?.[0]?.text;
+    const ocrData = await ocrResponse.json();
 
-    if (!rawText) {
-      throw new Error("AI tidak mengembalikan data");
+    if (ocrData.IsErroredOnProcessing) {
+      throw new Error(`OCR gagal: ${ocrData.ErrorMessage}`);
     }
 
-    // Parse JSON dari respons AI
-    let extractedData: any;
-    try {
-      const cleaned = rawText
-        .replace(/```json\n?/gi, "")
-        .replace(/```\n?/g, "")
-        .trim();
-      extractedData = JSON.parse(cleaned);
-    } catch (e) {
-      console.error("Failed to parse AI response:", rawText);
-      throw new Error("Gagal memproses respons AI: format tidak valid");
+    const rawText = ocrData.ParsedResults?.[0]?.ParsedText || "";
+    console.log("OCR raw text:", rawText);
+
+    if (!rawText.trim()) {
+      throw new Error("OCR tidak bisa membaca teks dari gambar");
     }
 
-    // Update the record in the database
+    // Parse teks OCR menjadi field-field KTP
+    const extractedData = parseKTPText(rawText);
+    console.log("Extracted KTP data:", extractedData);
+
+    // Update record di database
     const { error: updateError } = await supabase
       .from("ktp_records")
       .update({
@@ -146,7 +189,7 @@ Jika ada data yang tidak terbaca, isi dengan string kosong "".`,
       throw new Error("Failed to update record");
     }
 
-    return new Response(JSON.stringify({ success: true, data: extractedData }), {
+    return new Response(JSON.stringify({ success: true, data: extractedData, rawText }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {
