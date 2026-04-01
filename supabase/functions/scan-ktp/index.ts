@@ -93,13 +93,11 @@ Jika ada data yang tidak terbaca, isi dengan string kosong "".`
     if (!aiResponse.ok) {
       const errText = await aiResponse.text();
       console.error("Gemini error:", aiResponse.status, errText);
-      if (aiResponse.status === 429) {
-        return new Response(
-          JSON.stringify({ error: "Terlalu banyak permintaan ke Gemini, coba lagi nanti." }),
-          { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-      throw new Error(`Gemini API error ${aiResponse.status}: ${errText.substring(0, 200)}`);
+      // Return 200 dengan error field agar pesan tidak hilang
+      return new Response(
+        JSON.stringify({ error: `Gemini API error ${aiResponse.status}: ${errText.substring(0, 300)}` }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
     }
 
     const aiData = await aiResponse.json();
@@ -145,9 +143,10 @@ Jika ada data yang tidak terbaca, isi dengan string kosong "".`
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error("scan-ktp error:", msg);
+    // Return 200 dengan error field agar bisa dibaca frontend
     return new Response(
       JSON.stringify({ error: msg }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }
 });
