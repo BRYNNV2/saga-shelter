@@ -1,7 +1,6 @@
 /* eslint-disable */
 // @ts-nocheck
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { encode as encodeBase64 } from "https://deno.land/std@0.168.0/encoding/base64.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
@@ -10,51 +9,6 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-function extractField(text: string, ...labels: string[]): string {
-  for (const label of labels) {
-    const regex = new RegExp(label + "[\\s:]+([^\\n]+)", "i");
-    const match = text.match(regex);
-    if (match) return match[1].trim();
-  }
-  return "";
-}
-
-function extract16Digit(text: string, offset = 0): string {
-  const matches = [...text.matchAll(/\b(\d{16})\b/g)];
-  return matches[offset] ? matches[offset][1] : "";
-}
-
-function parseAnggotaKK(text: string): any[] {
-  const anggota: any[] = [];
-  const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
-  for (let i = 0; i < lines.length; i++) {
-    const nikMatch = lines[i].match(/\b(\d{16})\b/);
-    if (nikMatch) {
-      const nik = nikMatch[1];
-      const namaLine = lines[i].replace(nik, "").trim() || (i > 0 ? lines[i - 1] : "");
-      const nama = namaLine.replace(/^\d+\.?\s*/, "").trim();
-      if (nama && nama.length > 2) {
-        anggota.push({ nama, nik, jenis_kelamin: "", tempat_lahir: "", tanggal_lahir: "", agama: "", pendidikan: "", pekerjaan: "", status_perkawinan: "", hubungan_keluarga: "", kewarganegaraan: "WNI" });
-      }
-    }
-  }
-  return anggota;
-}
-
-function parseKKText(text: string): any {
-  const fullText = text;
-  const no_kk = extract16Digit(fullText, 0);
-  const kepala_keluarga = extractField(fullText, "Kepala Keluarga", "Nama Kepala", "KEPALA KELUARGA");
-  const alamat = extractField(fullText, "Alamat", "ALAMAT");
-  const rt_rw = extractField(fullText, "RT\\/RW", "RT/RW", "RTRW");
-  const kelurahan = extractField(fullText, "Kel\\/Desa", "Kelurahan", "Desa");
-  const kecamatan = extractField(fullText, "Kecamatan");
-  const kabupaten = extractField(fullText, "Kabupaten", "Kota", "Kab\\/Kota");
-  const provinsi = extractField(fullText, "Provinsi");
-  const anggota = parseAnggotaKK(fullText);
-  return { no_kk, kepala_keluarga, alamat, rt_rw, kelurahan, kecamatan, kabupaten, provinsi, anggota };
-}
-
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -62,68 +16,116 @@ serve(async (req) => {
 
   try {
     const { imageUrl, recordId } = await req.json();
-    if (!imageUrl) throw new Error("imageUrl diperlukan");
+    const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
+    if (!GEMINI_API_KEY) throw new Error("GEMINI_API_KEY is not configured");
 
-    const OCR_API_KEY = Deno.env.get("OCRSPACE_API_KEY") || "helloworld";
-    const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+    const supabase = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+    );
 
-    // Download gambar
-    console.log("Step 1: Downloading image:", imageUrl);
-    const imgResp = await fetch(imageUrl);
-    if (!imgResp.ok) throw new Error(`Gagal download gambar: HTTP ${imgResp.status} ${imgResp.statusText}`);
-
-    const imgBuffer = await imgResp.arrayBuffer();
+    // Download gambar dan convert ke base64
+    console.log("Downloading image:", imageUrl);
+    const imgResponse = await fetch(imageUrl);
+    if (!imgResponse.ok) throw new Error(`Gagal download gambar: ${imgResponse.status}`);
+    const imgBuffer = await imgResponse.arrayBuffer();
     const imgBytes = new Uint8Array(imgBuffer);
-    console.log("Step 2: Image size:", imgBytes.length, "bytes");
 
-    if (imgBytes.length > 1024 * 1024) {
-      console.warn("Image > 1MB, OCR.space free key may reject it");
+    // Convert ke base64 (chunk agar tidak stack overflow)
+    let binary = "";
+    const chunkSize = 1024;
+    for (let i = 0; i < imgBytes.length; i += chunkSize) {
+      const chunk = imgBytes.subarray(i, i + chunkSize);
+      binary += String.fromCharCode(...chunk);
+    }
+    const imageData = btoa(binary);
+
+    let imageMimeType = "image/jpeg";
+    if (imageUrl.toLowerCase().includes(".png")) imageMimeType = "image/png";
+    else if (imageUrl.toLowerCase().includes(".webp")) imageMimeType = "image/webp";
+
+    console.log("Calling Gemini API, image size:", imgBytes.length);
+
+    const aiResponse = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{
+            parts: [
+              {
+                text: `Kamu adalah OCR expert untuk dokumen Kartu Keluarga (KK) Indonesia.
+Ekstrak semua data dari gambar Kartu Keluarga ini dan kembalikan HANYA dalam format JSON berikut (tanpa markdown, tanpa kode block, tanpa penjelasan tambahan):
+{
+  "no_kk": "16 digit nomor KK",
+  "kepala_keluarga": "nama kepala keluarga",
+  "alamat": "alamat lengkap",
+  "rt_rw": "RT/RW seperti 001/002",
+  "kelurahan": "kelurahan/desa",
+  "kecamatan": "kecamatan",
+  "kabupaten": "kabupaten/kota",
+  "provinsi": "provinsi",
+  "anggota": [
+    {
+      "nama": "nama anggota",
+      "nik": "16 digit NIK",
+      "jenis_kelamin": "Laki-laki/Perempuan",
+      "tempat_lahir": "tempat lahir",
+      "tanggal_lahir": "tanggal lahir",
+      "agama": "agama",
+      "pendidikan": "pendidikan",
+      "pekerjaan": "pekerjaan",
+      "status_perkawinan": "status perkawinan",
+      "hubungan_keluarga": "hubungan keluarga",
+      "kewarganegaraan": "WNI/WNA"
+    }
+  ]
+}
+Jika ada data yang tidak terbaca, isi dengan string kosong "". Pastikan field anggota selalu berupa array.`
+              },
+              {
+                inline_data: {
+                  mime_type: imageMimeType,
+                  data: imageData,
+                }
+              }
+            ]
+          }],
+          generationConfig: { temperature: 0.1, maxOutputTokens: 4096 },
+        }),
+      }
+    );
+
+    console.log("Gemini response status:", aiResponse.status);
+
+    if (!aiResponse.ok) {
+      const errText = await aiResponse.text();
+      console.error("Gemini error:", aiResponse.status, errText);
+      if (aiResponse.status === 429) {
+        return new Response(
+          JSON.stringify({ error: "Terlalu banyak permintaan ke Gemini, coba lagi nanti." }),
+          { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+      throw new Error(`Gemini API error ${aiResponse.status}: ${errText.substring(0, 200)}`);
     }
 
-    // Encode base64 menggunakan Deno std library (lebih reliable)
-    const base64str = encodeBase64(imgBytes);
-    const base64Image = `data:image/jpeg;base64,${base64str}`;
-    console.log("Step 3: Base64 length:", base64str.length);
+    const aiData = await aiResponse.json();
+    const rawText = aiData.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!rawText) throw new Error("Gemini tidak mengembalikan data");
 
-    // Kirim ke OCR.space
-    const params = new URLSearchParams({
-      apikey: OCR_API_KEY,
-      base64Image: base64Image,
-      language: "eng",
-      isOverlayRequired: "false",
-      detectOrientation: "true",
-      scale: "true",
-      OCREngine: "2",
-    });
+    console.log("Gemini raw text:", rawText.substring(0, 300));
 
-    console.log("Step 4: Calling OCR.space...");
-    const ocrResp = await fetch("https://api.ocr.space/parse/image", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: params.toString(),
-    });
-
-    console.log("Step 5: OCR.space status:", ocrResp.status);
-    const ocrText = await ocrResp.text();
-    console.log("Step 6: OCR.space response:", ocrText.substring(0, 600));
-
-    let ocrData: any;
+    let extractedData: any;
     try {
-      ocrData = JSON.parse(ocrText);
+      const cleaned = rawText.replace(/```json\n?/gi, "").replace(/```\n?/g, "").trim();
+      extractedData = JSON.parse(cleaned);
     } catch {
-      throw new Error("OCR.space respons bukan JSON: " + ocrText.substring(0, 200));
+      throw new Error("Gagal parse JSON dari Gemini: " + rawText.substring(0, 100));
     }
 
-    if (ocrData.IsErroredOnProcessing) {
-      throw new Error(`OCR.space error: ${JSON.stringify(ocrData.ErrorMessage)}`);
-    }
-
-    const rawText = ocrData.ParsedResults?.[0]?.ParsedText || "";
-    console.log("Step 7: Parsed OCR text length:", rawText.length);
-    if (!rawText.trim()) throw new Error("OCR tidak menghasilkan teks (gambar mungkin buram/kosong)");
-
-    const extractedData = parseKKText(rawText);
-    console.log("Step 8: Extracted KK:", JSON.stringify(extractedData));
+    if (!Array.isArray(extractedData.anggota)) extractedData.anggota = [];
 
     const { error: updateError } = await supabase
       .from("kk_records")
@@ -136,7 +138,7 @@ serve(async (req) => {
         kecamatan: extractedData.kecamatan || null,
         kabupaten: extractedData.kabupaten || null,
         provinsi: extractedData.provinsi || null,
-        anggota: extractedData.anggota || [],
+        anggota: extractedData.anggota,
         status: "scanned",
       })
       .eq("id", recordId);
@@ -148,7 +150,7 @@ serve(async (req) => {
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    console.error("scan-kk FATAL:", msg);
+    console.error("scan-kk error:", msg);
     return new Response(
       JSON.stringify({ error: msg }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }

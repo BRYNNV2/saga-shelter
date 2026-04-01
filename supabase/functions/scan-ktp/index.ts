@@ -1,7 +1,6 @@
 /* eslint-disable */
 // @ts-nocheck
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { encode as encodeBase64 } from "https://deno.land/std@0.168.0/encoding/base64.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
@@ -10,66 +9,6 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-function extractField(text: string, ...labels: string[]): string {
-  for (const label of labels) {
-    const regex = new RegExp(label + "[\\s:]+([^\\n]+)", "i");
-    const match = text.match(regex);
-    if (match) return match[1].trim();
-  }
-  return "";
-}
-
-function extractNIK(text: string): string {
-  const match = text.match(/\b(\d{16})\b/);
-  return match ? match[1] : "";
-}
-
-function parseKTPText(text: string): any {
-  const fullText = text;
-  const nik = extractNIK(fullText);
-  const nama = extractField(fullText, "Nama", "NAMA");
-
-  let tempat_lahir = "";
-  let tanggal_lahir = "";
-  const ttlMatch = fullText.match(/Tempat\s*[\/]?\s*Tgl\s*Lahir\s*[:\s]+([^,\n]+)[,\s]+(\d{2}-\d{2}-\d{4})/i);
-  if (ttlMatch) {
-    tempat_lahir = ttlMatch[1].trim();
-    tanggal_lahir = ttlMatch[2].trim();
-  } else {
-    tempat_lahir = extractField(fullText, "Tempat Lahir", "Tempat\\/Tgl Lahir");
-    const tglMatch = fullText.match(/(\d{2}-\d{2}-\d{4})/);
-    if (tglMatch) tanggal_lahir = tglMatch[1];
-  }
-
-  let jenis_kelamin = extractField(fullText, "Jenis Kelamin", "Jenis\\/Kelamin");
-  if (!jenis_kelamin) {
-    if (/LAKI-LAKI/i.test(fullText)) jenis_kelamin = "LAKI-LAKI";
-    else if (/PEREMPUAN/i.test(fullText)) jenis_kelamin = "PEREMPUAN";
-  }
-
-  let golongan_darah = extractField(fullText, "Gol\\. Darah", "Golongan Darah");
-  if (!golongan_darah) {
-    const gdMatch = fullText.match(/\b(A|B|AB|O)\b/);
-    if (gdMatch) golongan_darah = gdMatch[1];
-  }
-
-  const alamat = extractField(fullText, "Alamat", "ALAMAT");
-  const rt_rw = extractField(fullText, "RT\\/RW", "RTRW", "RT/RW");
-  const kelurahan = extractField(fullText, "Kel\\/Desa", "Kelurahan", "KELURAHAN");
-  const kecamatan = extractField(fullText, "Kecamatan", "KECAMATAN");
-  const agama = extractField(fullText, "Agama", "AGAMA");
-  const status_perkawinan = extractField(fullText, "Status Perkawinan", "Status Perkawin");
-  const pekerjaan = extractField(fullText, "Pekerjaan", "PEKERJAAN");
-
-  let kewarganegaraan = extractField(fullText, "Kewarganegaraan");
-  if (!kewarganegaraan) {
-    if (/WNI/i.test(fullText)) kewarganegaraan = "WNI";
-    else if (/WNA/i.test(fullText)) kewarganegaraan = "WNA";
-  }
-
-  return { nik, nama, tempat_lahir, tanggal_lahir, jenis_kelamin, golongan_darah, alamat, rt_rw, kelurahan, kecamatan, agama, status_perkawinan, pekerjaan, kewarganegaraan };
-}
-
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -77,64 +16,105 @@ serve(async (req) => {
 
   try {
     const { imageUrl, recordId } = await req.json();
-    if (!imageUrl) throw new Error("imageUrl diperlukan");
+    const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
+    if (!GEMINI_API_KEY) throw new Error("GEMINI_API_KEY is not configured");
 
-    const OCR_API_KEY = Deno.env.get("OCRSPACE_API_KEY") || "helloworld";
-    const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+    const supabase = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+    );
 
-    // Download gambar
-    console.log("Step 1: Downloading image:", imageUrl);
-    const imgResp = await fetch(imageUrl);
-    if (!imgResp.ok) throw new Error(`Gagal download gambar: HTTP ${imgResp.status} ${imgResp.statusText}`);
-
-    const imgBuffer = await imgResp.arrayBuffer();
+    // Download gambar dan convert ke base64
+    console.log("Downloading image:", imageUrl);
+    const imgResponse = await fetch(imageUrl);
+    if (!imgResponse.ok) throw new Error(`Gagal download gambar: ${imgResponse.status}`);
+    const imgBuffer = await imgResponse.arrayBuffer();
     const imgBytes = new Uint8Array(imgBuffer);
-    console.log("Step 2: Image size:", imgBytes.length, "bytes");
 
-    // Encode base64 menggunakan Deno std library
-    const base64str = encodeBase64(imgBytes);
-    const base64Image = `data:image/jpeg;base64,${base64str}`;
-    console.log("Step 3: Base64 length:", base64str.length);
+    // Convert ke base64 (chunk agar tidak stack overflow)
+    let binary = "";
+    const chunkSize = 1024;
+    for (let i = 0; i < imgBytes.length; i += chunkSize) {
+      const chunk = imgBytes.subarray(i, i + chunkSize);
+      binary += String.fromCharCode(...chunk);
+    }
+    const imageData = btoa(binary);
 
-    // Kirim ke OCR.space
-    const params = new URLSearchParams({
-      apikey: OCR_API_KEY,
-      base64Image: base64Image,
-      language: "eng",
-      isOverlayRequired: "false",
-      detectOrientation: "true",
-      scale: "true",
-      OCREngine: "2",
-    });
+    let imageMimeType = "image/jpeg";
+    if (imageUrl.toLowerCase().includes(".png")) imageMimeType = "image/png";
+    else if (imageUrl.toLowerCase().includes(".webp")) imageMimeType = "image/webp";
 
-    console.log("Step 4: Calling OCR.space...");
-    const ocrResp = await fetch("https://api.ocr.space/parse/image", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: params.toString(),
-    });
+    console.log("Calling Gemini API, image size:", imgBytes.length);
 
-    console.log("Step 5: OCR.space status:", ocrResp.status);
-    const ocrText = await ocrResp.text();
-    console.log("Step 6: OCR.space response:", ocrText.substring(0, 600));
+    const aiResponse = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{
+            parts: [
+              {
+                text: `Kamu adalah OCR expert untuk dokumen Kartu Tanda Penduduk (KTP) Indonesia.
+Ekstrak semua data dari gambar KTP ini dan kembalikan HANYA dalam format JSON berikut (tanpa markdown, tanpa kode block, tanpa penjelasan tambahan):
+{
+  "nik": "16 digit NIK",
+  "nama": "nama lengkap",
+  "tempat_lahir": "tempat lahir",
+  "tanggal_lahir": "tanggal lahir format DD-MM-YYYY",
+  "jenis_kelamin": "LAKI-LAKI atau PEREMPUAN",
+  "golongan_darah": "A/B/AB/O/-",
+  "alamat": "alamat tempat tinggal",
+  "rt_rw": "RT/RW seperti 001/002",
+  "kelurahan": "kelurahan/desa",
+  "kecamatan": "kecamatan",
+  "agama": "agama",
+  "status_perkawinan": "status perkawinan",
+  "pekerjaan": "pekerjaan",
+  "kewarganegaraan": "WNI atau WNA"
+}
+Jika ada data yang tidak terbaca, isi dengan string kosong "".`
+              },
+              {
+                inline_data: {
+                  mime_type: imageMimeType,
+                  data: imageData,
+                }
+              }
+            ]
+          }],
+          generationConfig: { temperature: 0.1, maxOutputTokens: 2048 },
+        }),
+      }
+    );
 
-    let ocrData: any;
+    console.log("Gemini response status:", aiResponse.status);
+
+    if (!aiResponse.ok) {
+      const errText = await aiResponse.text();
+      console.error("Gemini error:", aiResponse.status, errText);
+      if (aiResponse.status === 429) {
+        return new Response(
+          JSON.stringify({ error: "Terlalu banyak permintaan ke Gemini, coba lagi nanti." }),
+          { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+      throw new Error(`Gemini API error ${aiResponse.status}: ${errText.substring(0, 200)}`);
+    }
+
+    const aiData = await aiResponse.json();
+    const rawText = aiData.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!rawText) throw new Error("Gemini tidak mengembalikan data");
+
+    console.log("Gemini raw text:", rawText.substring(0, 300));
+
+    let extractedData: any;
     try {
-      ocrData = JSON.parse(ocrText);
+      const cleaned = rawText.replace(/```json\n?/gi, "").replace(/```\n?/g, "").trim();
+      extractedData = JSON.parse(cleaned);
     } catch {
-      throw new Error("OCR.space respons bukan JSON: " + ocrText.substring(0, 200));
+      throw new Error("Gagal parse JSON dari Gemini: " + rawText.substring(0, 100));
     }
-
-    if (ocrData.IsErroredOnProcessing) {
-      throw new Error(`OCR.space error: ${JSON.stringify(ocrData.ErrorMessage)}`);
-    }
-
-    const rawText = ocrData.ParsedResults?.[0]?.ParsedText || "";
-    console.log("Step 7: OCR text length:", rawText.length);
-    if (!rawText.trim()) throw new Error("OCR tidak menghasilkan teks (gambar mungkin buram/kosong)");
-
-    const extractedData = parseKTPText(rawText);
-    console.log("Step 8: Extracted:", JSON.stringify(extractedData));
 
     const { error: updateError } = await supabase
       .from("ktp_records")
@@ -164,7 +144,7 @@ serve(async (req) => {
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    console.error("scan-ktp FATAL:", msg);
+    console.error("scan-ktp error:", msg);
     return new Response(
       JSON.stringify({ error: msg }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
