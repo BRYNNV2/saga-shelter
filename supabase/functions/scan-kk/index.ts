@@ -61,48 +61,65 @@ serve(async (req) => {
 
   try {
     const { imageUrl, recordId } = await req.json();
-
     if (!imageUrl) throw new Error("imageUrl diperlukan");
 
     const OCR_API_KEY = Deno.env.get("OCRSPACE_API_KEY") || "helloworld";
     const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 
-    // Download gambar terlebih dahulu
-    console.log("Downloading image from:", imageUrl);
+    // Download gambar dan convert ke base64
+    console.log("Downloading image:", imageUrl);
     const imgResp = await fetch(imageUrl);
     if (!imgResp.ok) throw new Error(`Gagal download gambar: ${imgResp.status}`);
-    const imgBlob = await imgResp.blob();
+    const imgBuffer = await imgResp.arrayBuffer();
+    const imgBytes = new Uint8Array(imgBuffer);
 
-    // Kirim ke OCR.space sebagai file upload
-    const formData = new FormData();
-    formData.append("apikey", OCR_API_KEY);
-    formData.append("file", imgBlob, "image.jpg");
-    formData.append("language", "eng");
-    formData.append("isOverlayRequired", "false");
-    formData.append("detectOrientation", "true");
-    formData.append("scale", "true");
-    formData.append("OCREngine", "2");
+    // Convert ke base64
+    let binary = "";
+    const chunkSize = 8192;
+    for (let i = 0; i < imgBytes.length; i += chunkSize) {
+      binary += String.fromCharCode(...imgBytes.slice(i, i + chunkSize));
+    }
+    const base64 = btoa(binary);
+    const base64Image = `data:image/jpeg;base64,${base64}`;
 
-    console.log("Sending to OCR.space...");
+    // Kirim ke OCR.space via base64
+    const params = new URLSearchParams();
+    params.append("apikey", OCR_API_KEY);
+    params.append("base64Image", base64Image);
+    params.append("language", "eng");
+    params.append("isOverlayRequired", "false");
+    params.append("detectOrientation", "true");
+    params.append("scale", "true");
+    params.append("OCREngine", "2");
+
+    console.log("Calling OCR.space API...");
     const ocrResp = await fetch("https://api.ocr.space/parse/image", {
       method: "POST",
-      body: formData,
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: params.toString(),
     });
 
-    const ocrData = await ocrResp.json();
-    console.log("OCR.space response:", JSON.stringify(ocrData));
+    const ocrText = await ocrResp.text();
+    console.log("OCR.space raw response:", ocrText.substring(0, 500));
+
+    let ocrData: any;
+    try {
+      ocrData = JSON.parse(ocrText);
+    } catch {
+      throw new Error("OCR.space mengembalikan respons tidak valid: " + ocrText.substring(0, 200));
+    }
 
     if (ocrData.IsErroredOnProcessing) {
       throw new Error(`OCR error: ${JSON.stringify(ocrData.ErrorMessage)}`);
     }
 
     const rawText = ocrData.ParsedResults?.[0]?.ParsedText || "";
-    if (!rawText.trim()) throw new Error("OCR tidak mengembalikan teks dari gambar");
+    if (!rawText.trim()) throw new Error("OCR tidak bisa membaca teks dari gambar");
 
-    console.log("Raw OCR text:", rawText);
+    console.log("OCR text:", rawText.substring(0, 300));
 
     const extractedData = parseKKText(rawText);
-    console.log("Parsed KK:", extractedData);
+    console.log("Parsed KK:", JSON.stringify(extractedData));
 
     const { error: updateError } = await supabase
       .from("kk_records")
@@ -120,15 +137,15 @@ serve(async (req) => {
       })
       .eq("id", recordId);
 
-    if (updateError) throw new Error("Gagal menyimpan ke database: " + updateError.message);
+    if (updateError) throw new Error("Gagal simpan ke DB: " + updateError.message);
 
     return new Response(JSON.stringify({ success: true, data: extractedData }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {
-    console.error("scan-kk error:", e);
+    console.error("scan-kk error:", e?.message || e);
     return new Response(
-      JSON.stringify({ error: e instanceof Error ? e.message : "Unknown error" }),
+      JSON.stringify({ error: e instanceof Error ? e.message : String(e) }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }
