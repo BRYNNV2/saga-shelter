@@ -3,7 +3,7 @@ import DashboardSidebar from "@/components/DashboardSidebar";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useActivityLog } from "@/hooks/useActivityLog";
 import { printData } from "@/lib/printUtils";
 import {
@@ -49,10 +49,19 @@ const BerkasKTP = () => {
   const [uploading, setUploading] = useState(false);
   const [importingExcel, setImportingExcel] = useState(false);
   const [scanningId, setScanningId] = useState<string | null>(null);
+  const [cooldown, setCooldown] = useState(0);
   const [viewRecord, setViewRecord] = useState<any>(null);
   const [editRecord, setEditRecord] = useState<any>(null);
   const [savingEdit, setSavingEdit] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
+
+  // Cooldown effect
+  useEffect(() => {
+    if (cooldown > 0) {
+      const timer = setInterval(() => setCooldown((c) => c - 1), 1000);
+      return () => clearInterval(timer);
+    }
+  }, [cooldown]);
 
   // Helper — open edit dialog with a deep copy
   const openEdit = (rec: any) => {
@@ -155,6 +164,9 @@ const BerkasKTP = () => {
       log({ action: "scan", entityType: "ktp", description: `Scan KTP berhasil diekstrak` });
     },
     onError: (err: any) => {
+      if (err.message.toLocaleLowerCase().includes("rate limit") || err.message.includes("429")) {
+        setCooldown(60);
+      }
       toast({
         title: "Scan gagal",
         description: err.message,
@@ -637,14 +649,18 @@ const BerkasKTP = () => {
                           size="sm"
                           variant="secondary"
                           onClick={() => scanMutation.mutate(record)}
-                          disabled={scanningId === record.id}
+                          disabled={scanningId === record.id || cooldown > 0}
                         >
                           {scanningId === record.id ? (
                             <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : cooldown > 0 ? (
+                            <Clock className="h-4 w-4" />
                           ) : (
                             <FileSearch className="h-4 w-4" />
                           )}
-                          <span className="ml-1">Scan</span>
+                          <span className="ml-1">
+                            {cooldown > 0 ? `Tunggu ${cooldown}s` : "Scan"}
+                          </span>
                         </Button>
                       )}
 

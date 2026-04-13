@@ -44,76 +44,85 @@ serve(async (req) => {
     if (imageUrl.toLowerCase().includes(".png")) imageMimeType = "image/png";
     else if (imageUrl.toLowerCase().includes(".webp")) imageMimeType = "image/webp";
 
-    console.log("Calling Gemini API, image size:", imgBytes.length);
+    const models = [
+      "gemini-2.0-flash",
+      "gemini-1.5-flash",
+      "gemini-1.5-flash-8b",
+      "gemini-pro-vision"
+    ];
 
-    const aiResponse = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{
-            parts: [
-              {
-                text: `Kamu adalah OCR expert untuk dokumen Kartu Tanda Penduduk (KTP) Indonesia.
-Ekstrak semua data dari gambar KTP ini dan kembalikan HANYA dalam format JSON berikut (tanpa markdown, tanpa kode block, tanpa penjelasan tambahan):
+    let aiResponse;
+    let lastError = "";
+
+    for (const model of models) {
+      console.log(`Trying model: ${model}`);
+      aiResponse = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{
+              parts: [
+                {
+                  text: `Kamu adalah OCR expert untuk dokumen Kartu Tanda Penduduk (KTP) Indonesia.
+Ekstrak semua data dari gambar KTP ini dan kembalikan HANYA dalam format JSON berikut:
 {
   "nik": "16 digit NIK",
   "nama": "nama lengkap",
   "tempat_lahir": "tempat lahir",
-  "tanggal_lahir": "tanggal lahir format DD-MM-YYYY",
-  "jenis_kelamin": "LAKI-LAKI atau PEREMPUAN",
+  "tanggal_lahir": "tanggal lahir DD-MM-YYYY",
+  "jenis_kelamin": "LAKI-LAKI/PEREMPUAN",
   "golongan_darah": "A/B/AB/O/-",
-  "alamat": "alamat tempat tinggal",
-  "rt_rw": "RT/RW seperti 001/002",
-  "kelurahan": "kelurahan/desa",
+  "alamat": "alamat lengkap",
+  "rt_rw": "RT/RW",
+  "kelurahan": "kelurahan",
   "kecamatan": "kecamatan",
   "agama": "agama",
-  "status_perkawinan": "status perkawinan",
+  "status_perkawinan": "status",
   "pekerjaan": "pekerjaan",
-  "kewarganegaraan": "WNI atau WNA"
-}
-Jika ada data yang tidak terbaca, isi dengan string kosong "".`
-              },
-              {
-                inline_data: {
-                  mime_type: imageMimeType,
-                  data: imageData,
+  "kewarganegaraan": "WNI"
+}`
+                },
+                {
+                  inline_data: {
+                    mime_type: imageMimeType,
+                    data: imageData,
+                  }
                 }
-              }
-            ]
-          }],
-          generationConfig: { temperature: 0.1, maxOutputTokens: 2048 },
-        }),
-      }
-    );
+              ]
+            }],
+            generationConfig: { temperature: 0.1, maxOutputTokens: 1024 },
+          }),
+        }
+      );
 
-    console.log("Gemini response status:", aiResponse.status);
+      if (aiResponse.ok) break;
+
+      const errText = await aiResponse.text();
+      lastError = `${model}: ${aiResponse.status} ${errText.substring(0, 50)}`;
+      console.warn(`Model ${model} failed:`, lastError);
+      
+      if (aiResponse.status !== 429 && aiResponse.status !== 404) break;
+    }
 
     if (!aiResponse.ok) {
-      const errText = await aiResponse.text();
-      console.error("Gemini error:", aiResponse.status, errText);
-      const userMsg = aiResponse.status === 429
-        ? "Scan AI sedang sibuk (rate limit). Tunggu 1-2 menit lalu coba lagi."
-        : `Gemini API error ${aiResponse.status}: ${errText.substring(0, 200)}`;
       return new Response(
-        JSON.stringify({ error: userMsg }),
+        JSON.stringify({ error: `Semua model AI sedang sibuk (Quota Limit). Mohon tunggu 5-10 menit. (${lastError})` }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
     const aiData = await aiResponse.json();
     const rawText = aiData.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!rawText) throw new Error("Gemini tidak mengembalikan data");
-
-    console.log("Gemini raw text:", rawText.substring(0, 300));
+    if (!rawText) throw new Error("AI tidak mengembalikan teks");
 
     let extractedData: any;
     try {
       const cleaned = rawText.replace(/```json\n?/gi, "").replace(/```\n?/g, "").trim();
       extractedData = JSON.parse(cleaned);
     } catch {
-      throw new Error("Gagal parse JSON dari Gemini: " + rawText.substring(0, 100));
+      throw new Error("Gagal parse data dari AI");
     }
 
     const { error: updateError } = await supabase
@@ -137,17 +146,14 @@ Jika ada data yang tidak terbaca, isi dengan string kosong "".`
       })
       .eq("id", recordId);
 
-    if (updateError) throw new Error("DB update error: " + updateError.message);
+    if (updateError) throw new Error("Gagal update database");
 
     return new Response(JSON.stringify({ success: true, data: extractedData }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    console.error("scan-ktp error:", msg);
-    // Return 200 dengan error field agar bisa dibaca frontend
     return new Response(
-      JSON.stringify({ error: msg }),
+      JSON.stringify({ error: e instanceof Error ? e.message : String(e) }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }

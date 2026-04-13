@@ -44,85 +44,95 @@ serve(async (req) => {
     if (imageUrl.toLowerCase().includes(".png")) imageMimeType = "image/png";
     else if (imageUrl.toLowerCase().includes(".webp")) imageMimeType = "image/webp";
 
-    console.log("Calling Gemini API, image size:", imgBytes.length);
+    const models = [
+      "gemini-2.0-flash",
+      "gemini-1.5-flash",
+      "gemini-1.5-flash-8b",
+      "gemini-pro-vision"
+    ];
 
-    const aiResponse = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{
-            parts: [
-              {
-                text: `Kamu adalah OCR expert untuk dokumen Kartu Keluarga (KK) Indonesia.
-Ekstrak semua data dari gambar Kartu Keluarga ini dan kembalikan HANYA dalam format JSON berikut (tanpa markdown, tanpa kode block, tanpa penjelasan tambahan):
+    let aiResponse;
+    let lastError = "";
+
+    for (const model of models) {
+      console.log(`Trying model: ${model}`);
+      aiResponse = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{
+              parts: [
+                {
+                  text: `Kamu adalah OCR expert untuk dokumen Kartu Keluarga (KK) Indonesia.
+Ekstrak semua data dari gambar KK ini dan kembalikan HANYA dalam format JSON berikut:
 {
-  "no_kk": "16 digit nomor KK",
-  "kepala_keluarga": "nama kepala keluarga",
-  "alamat": "alamat lengkap",
-  "rt_rw": "RT/RW seperti 001/002",
-  "kelurahan": "kelurahan/desa",
+  "no_kk": "nomor KK",
+  "kepala_keluarga": "kepala keluarga",
+  "alamat": "alamat",
+  "rt_rw": "RT/RW",
+  "kelurahan": "kelurahan",
   "kecamatan": "kecamatan",
-  "kabupaten": "kabupaten/kota",
+  "kabupaten": "kabupaten",
   "provinsi": "provinsi",
   "anggota": [
     {
-      "nama": "nama anggota",
-      "nik": "16 digit NIK",
-      "jenis_kelamin": "Laki-laki/Perempuan",
-      "tempat_lahir": "tempat lahir",
-      "tanggal_lahir": "tanggal lahir",
+      "nama": "nama",
+      "nik": "NIK",
+      "jenis_kelamin": "L/P",
+      "tempat_lahir": "tempat",
+      "tanggal_lahir": "tgl",
       "agama": "agama",
       "pendidikan": "pendidikan",
       "pekerjaan": "pekerjaan",
-      "status_perkawinan": "status perkawinan",
-      "hubungan_keluarga": "hubungan keluarga",
-      "kewarganegaraan": "WNI/WNA"
+      "status_perkawinan": "status",
+      "hubungan_keluarga": "hubungan",
+      "kewarganegaraan": "WNI"
     }
   ]
-}
-Jika ada data yang tidak terbaca, isi dengan string kosong "". Pastikan field anggota selalu berupa array.`
-              },
-              {
-                inline_data: {
-                  mime_type: imageMimeType,
-                  data: imageData,
+}`
+                },
+                {
+                  inline_data: {
+                    mime_type: imageMimeType,
+                    data: imageData,
+                  }
                 }
-              }
-            ]
-          }],
-          generationConfig: { temperature: 0.1, maxOutputTokens: 4096 },
-        }),
-      }
-    );
+              ]
+            }],
+            generationConfig: { temperature: 0.1, maxOutputTokens: 2048 },
+          }),
+        }
+      );
 
-    console.log("Gemini response status:", aiResponse.status);
+      if (aiResponse.ok) break;
+
+      const errText = await aiResponse.text();
+      lastError = `${model}: ${aiResponse.status} ${errText.substring(0, 50)}`;
+      console.warn(`Model ${model} failed:`, lastError);
+      
+      if (aiResponse.status !== 429 && aiResponse.status !== 404) break;
+    }
 
     if (!aiResponse.ok) {
-      const errText = await aiResponse.text();
-      console.error("Gemini error:", aiResponse.status, errText);
       return new Response(
-        JSON.stringify({ error: `Gemini API error ${aiResponse.status}: ${errText.substring(0, 300)}` }),
+        JSON.stringify({ error: `Semua model AI sedang sibuk (Quota Limit). Mohon tunggu 5-10 menit. (${lastError})` }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
     const aiData = await aiResponse.json();
     const rawText = aiData.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!rawText) throw new Error("Gemini tidak mengembalikan data");
-
-    console.log("Gemini raw text:", rawText.substring(0, 300));
+    if (!rawText) throw new Error("AI tidak mengembalikan teks");
 
     let extractedData: any;
     try {
       const cleaned = rawText.replace(/```json\n?/gi, "").replace(/```\n?/g, "").trim();
       extractedData = JSON.parse(cleaned);
     } catch {
-      throw new Error("Gagal parse JSON dari Gemini: " + rawText.substring(0, 100));
+      throw new Error("Gagal parse data dari AI");
     }
-
-    if (!Array.isArray(extractedData.anggota)) extractedData.anggota = [];
 
     const { error: updateError } = await supabase
       .from("kk_records")
@@ -135,21 +145,19 @@ Jika ada data yang tidak terbaca, isi dengan string kosong "". Pastikan field an
         kecamatan: extractedData.kecamatan || null,
         kabupaten: extractedData.kabupaten || null,
         provinsi: extractedData.provinsi || null,
-        anggota: extractedData.anggota,
+        anggota: extractedData.anggota || [],
         status: "scanned",
       })
       .eq("id", recordId);
 
-    if (updateError) throw new Error("DB update error: " + updateError.message);
+    if (updateError) throw new Error("Gagal update database");
 
     return new Response(JSON.stringify({ success: true, data: extractedData }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    console.error("scan-kk error:", msg);
     return new Response(
-      JSON.stringify({ error: msg }),
+      JSON.stringify({ error: e instanceof Error ? e.message : String(e) }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }
